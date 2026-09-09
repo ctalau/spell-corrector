@@ -62,12 +62,17 @@ class LoadedModel:
     load_class: str
 
 
-def load_llm(model_id: str, *, dtype: str = "bfloat16", trust_remote_code: bool = True) -> LoadedModel:
+def load_llm(model_id: str, *, dtype: str = "auto", trust_remote_code: bool = True) -> LoadedModel:
     import torch
     import transformers
     from transformers import AutoTokenizer
 
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+    if dtype == "auto":
+        # bf16 halves resident memory versus fp32, which matters most on a
+        # CPU box with limited RAM; CPU matmul kernels support it in recent
+        # PyTorch, just slower than fp32 in some paths.
+        dtype = "bfloat16"
     tokenizer = AutoTokenizer.from_pretrained(model_id, trust_remote_code=trust_remote_code)
     torch_dtype = getattr(torch, dtype)
 
@@ -75,16 +80,24 @@ def load_llm(model_id: str, *, dtype: str = "bfloat16", trust_remote_code: bool 
     load_class = None
     last_exc: Exception | None = None
     # Newest small instruct releases are frequently multimodal (vision/audio
-    # encoder attached); AutoModelForCausalLM fails to load those, so fall
-    # back through the classes that do until one of them works for
-    # text-only generation.
-    for class_name in ("AutoModelForCausalLM", "AutoModelForImageTextToText", "AutoModel"):
+    # encoder attached) and are published expecting AutoModelForMultimodalLM;
+    # fall back through the other classes until one works for text-only
+    # generation.
+    for class_name in (
+        "AutoModelForMultimodalLM",
+        "AutoModelForCausalLM",
+        "AutoModelForImageTextToText",
+        "AutoModel",
+    ):
         loader = getattr(transformers, class_name, None)
         if loader is None:
             continue
         try:
             model = loader.from_pretrained(
-                model_id, torch_dtype=torch_dtype, trust_remote_code=trust_remote_code
+                model_id,
+                torch_dtype=torch_dtype,
+                trust_remote_code=trust_remote_code,
+                low_cpu_mem_usage=True,
             )
             load_class = class_name
             break

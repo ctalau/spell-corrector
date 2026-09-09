@@ -173,7 +173,7 @@ def main() -> int:
     parser.add_argument("--time-budget-seconds", type=float, default=300.0)
     parser.add_argument("--max-candidates", type=int, default=8)
     parser.add_argument("--max-new-tokens", type=int, default=8)
-    parser.add_argument("--dtype", default="bfloat16")
+    parser.add_argument("--dtype", default="auto", help="'auto' -> bfloat16 (memory-safe on CPU too)")
     args = parser.parse_args()
 
     args.output.mkdir(parents=True, exist_ok=True)

@@ -11,6 +11,7 @@ from spelling_reranker.byte_encoding import (
     CTX_END_ID,
     CTX_START_ID,
     LANG_EN_ID,
+    N_CANDIDATE_SLOTS,
     PAD_ID,
     TYPO_END_ID,
     TYPO_START_ID,
@@ -18,9 +19,9 @@ from spelling_reranker.byte_encoding import (
     text_to_byte_ids,
 )
 
-DEFAULT_MAX_SEQ_LEN = 384
-N_CANDIDATES = 10
-MAX_CANDIDATE_BYTES = 40
+DEFAULT_MAX_SEQ_LEN = 448
+N_CANDIDATES = N_CANDIDATE_SLOTS
+MAX_CANDIDATE_BYTES = 32
 
 
 class PathologicalExampleError(ValueError):
@@ -153,42 +154,45 @@ def pad_batch(
     *,
     max_seq_len: int | None = None,
 ) -> dict:
-    """Pad serialized examples into tensors-ready lists."""
+    """Pad serialized examples into batched numpy arrays.
+
+    Built with numpy rather than nested Python lists: the candidate mask alone
+    is batch x 16 x seq_len entries (~900k for a 128-example batch), and
+    materialising that as Python ints made collation, not the GPU, the
+    bottleneck.
+    """
     if not examples:
         raise ValueError("empty batch")
+    import numpy as np
+
     length = max(ex.seq_len for ex in examples)
     if max_seq_len is not None:
-        length = max(length, min(max_seq_len, length))
+        length = min(max(length, 1), max(max_seq_len, 1)) if length > max_seq_len else length
+    batch = len(examples)
 
-    batch_ids: list[list[int]] = []
-    attn: list[list[int]] = []
-    typo_masks: list[list[int]] = []
-    cand_masks: list[list[list[int]]] = []
-    cand_valid: list[list[int]] = []
-    gold: list[int] = []
+    token_ids = np.full((batch, length), PAD_ID, dtype=np.int64)
+    attention = np.zeros((batch, length), dtype=np.int64)
+    typo_mask = np.zeros((batch, length), dtype=np.int8)
+    cand_masks = np.zeros((batch, N_CANDIDATES, length), dtype=np.int8)
+    cand_valid = np.zeros((batch, N_CANDIDATES), dtype=np.int8)
+    gold = np.empty(batch, dtype=np.int64)
 
-    for ex in examples:
-        pad = length - ex.seq_len
-        ids = ex.token_ids + [PAD_ID] * pad
-        mask = [1] * ex.seq_len + [0] * pad
-        typo = [0] * length
-        for pos in ex.typo_positions:
-            typo[pos] = 1
-        cands = [[0] * length for _ in range(N_CANDIDATES)]
+    for i, ex in enumerate(examples):
+        n = ex.seq_len
+        token_ids[i, :n] = ex.token_ids
+        attention[i, :n] = 1
+        if ex.typo_positions:
+            typo_mask[i, ex.typo_positions] = 1
         for ci, positions in enumerate(ex.candidate_positions):
-            for pos in positions:
-                cands[ci][pos] = 1
-        batch_ids.append(ids)
-        attn.append(mask)
-        typo_masks.append(typo)
-        cand_masks.append(cands)
-        cand_valid.append([1 if v else 0 for v in ex.candidate_valid])
-        gold.append(-1 if ex.gold_index is None else int(ex.gold_index))
+            if positions:
+                cand_masks[i, ci, positions] = 1
+        cand_valid[i, : len(ex.candidate_valid)] = np.asarray(ex.candidate_valid, dtype=np.int8)
+        gold[i] = -1 if ex.gold_index is None else int(ex.gold_index)
 
     return {
-        "token_ids": batch_ids,
-        "attention_mask": attn,
-        "typo_mask": typo_masks,
+        "token_ids": token_ids,
+        "attention_mask": attention,
+        "typo_mask": typo_mask,
         "candidate_masks": cand_masks,
         "candidate_valid": cand_valid,
         "gold_index": gold,

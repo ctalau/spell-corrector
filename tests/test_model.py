@@ -2,8 +2,12 @@
 
 from __future__ import annotations
 
+from pathlib import Path
+
 import torch
 
+from spelling_reranker.byte_encoding import N_CANDIDATE_SLOTS
+from spelling_reranker.config import load_yaml, model_config_from_mapping
 from spelling_reranker.dataset import collate_examples
 from spelling_reranker.model import ByteSpellingReranker, ModelConfig, count_parameters, masked_cross_entropy
 from spelling_reranker.serialization import serialize_example
@@ -17,7 +21,7 @@ def _batch(n: int = 3):
                 f"Context {i} left ",
                 "quik",
                 " right.",
-                ["quick", "quirk", "quack", "quit"] + [None] * 6,
+                ["quick", "quirk", "quack", "quit"] + [None] * (N_CANDIDATE_SLOTS - 4),
                 gold_index=0,
                 max_seq_len=96,
             )
@@ -25,7 +29,7 @@ def _batch(n: int = 3):
     return collate_examples(examples)
 
 
-def test_logits_shape_is_batch_by_10() -> None:
+def test_logits_shape_is_batch_by_candidate_slots() -> None:
     model = ByteSpellingReranker(ModelConfig(n_layers=2, max_seq_len=96))
     batch = _batch(4)
     logits = model(
@@ -35,15 +39,35 @@ def test_logits_shape_is_batch_by_10() -> None:
         batch["candidate_masks"],
         batch["candidate_valid"],
     )
-    assert logits.shape == (4, 10)
+    assert logits.shape == (4, N_CANDIDATE_SLOTS)
 
 
-def test_parameter_count_approximately_28m() -> None:
-    model = ByteSpellingReranker(ModelConfig())
-    n = count_parameters(model)
-    print(f"trainable parameters: {n:,}")
-    assert n <= 29_000_000, f"model has {n} params, exceeds 29M"
-    assert 27_000_000 <= n <= 28_500_000, f"model has {n} params, expected ~28M"
+def test_config_parameter_counts_match_their_names() -> None:
+    """Each shipped model config must be the size its filename claims."""
+    expected = {
+        "configs/model_28m.yaml": (27_000_000, 29_000_000),
+        "configs/model_87m.yaml": (85_000_000, 89_000_000),
+    }
+    root = Path(__file__).resolve().parents[1]
+    for rel, (low, high) in expected.items():
+        cfg = model_config_from_mapping(load_yaml(root / rel))
+        n = count_parameters(ByteSpellingReranker(cfg))
+        print(f"{rel}: trainable parameters {n:,}")
+        assert low <= n <= high, f"{rel} has {n} params, expected {low}-{high}"
+
+
+def test_candidate_pooling_matches_the_naive_formulation() -> None:
+    """The bmm pooling must equal the elementwise mask-and-sum it replaced."""
+    torch.manual_seed(0)
+    model = ByteSpellingReranker(ModelConfig(n_layers=2, max_seq_len=96))
+    batch = _batch(3)
+    hidden = model.encode(batch["token_ids"], batch["attention_mask"])
+    masks = batch["candidate_masks"]
+    weights = masks.to(hidden.dtype)
+    fast = torch.bmm(weights, hidden) / weights.sum(dim=2).clamp(min=1e-6).unsqueeze(-1)
+    naive_w = weights.unsqueeze(-1)
+    naive = (hidden.unsqueeze(1) * naive_w).sum(dim=2) / naive_w.sum(dim=2).clamp(min=1e-6)
+    assert torch.allclose(fast, naive, atol=1e-5)
 
 
 def test_cross_entropy_forward_backward() -> None:

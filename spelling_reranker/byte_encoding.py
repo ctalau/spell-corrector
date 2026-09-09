@@ -7,6 +7,11 @@ from typing import Iterable, Mapping
 
 BYTE_VOCAB = 256
 
+#: Number of candidate slots the model scores in a single forward pass.
+#: Widened from 10 to 16 so the pool can hold Hunspell's suggestions *and*
+#: the Aspell suggestions Hunspell misses (see reports/EXPERIMENT.md).
+N_CANDIDATE_SLOTS = 16
+
 PAD_ID = 256
 CLS_ID = 257
 LANG_EN_ID = 258
@@ -15,9 +20,12 @@ CTX_END_ID = 260
 TYPO_START_ID = 261
 TYPO_END_ID = 262
 CAND_0_ID = 263
-CAND_IDS = tuple(range(CAND_0_ID, CAND_0_ID + 10))
-CAND_END_ID = 273
-VOCAB_SIZE = 274
+CAND_IDS = tuple(range(CAND_0_ID, CAND_0_ID + N_CANDIDATE_SLOTS))
+CAND_END_ID = CAND_IDS[-1] + 1
+#: Used only by the auxiliary masked-byte objective during training. Inference
+#: never emits it.
+MASK_ID = CAND_END_ID + 1
+VOCAB_SIZE = MASK_ID + 1
 
 SPECIAL_TOKEN_NAMES = (
     "PAD",
@@ -27,17 +35,9 @@ SPECIAL_TOKEN_NAMES = (
     "CTX_END",
     "TYPO_START",
     "TYPO_END",
-    "CAND_0",
-    "CAND_1",
-    "CAND_2",
-    "CAND_3",
-    "CAND_4",
-    "CAND_5",
-    "CAND_6",
-    "CAND_7",
-    "CAND_8",
-    "CAND_9",
+    *[f"CAND_{i}" for i in range(N_CANDIDATE_SLOTS)],
     "CAND_END",
+    "MASK",
 )
 
 
@@ -57,7 +57,7 @@ def byte_ids_to_text(ids: Iterable[int]) -> str:
 
 
 def special_tokens_map() -> dict[str, int]:
-    return {
+    mapping: dict[str, int] = {
         "PAD": PAD_ID,
         "CLS": CLS_ID,
         "LANG_EN": LANG_EN_ID,
@@ -65,20 +65,14 @@ def special_tokens_map() -> dict[str, int]:
         "CTX_END": CTX_END_ID,
         "TYPO_START": TYPO_START_ID,
         "TYPO_END": TYPO_END_ID,
-        "CAND_0": CAND_IDS[0],
-        "CAND_1": CAND_IDS[1],
-        "CAND_2": CAND_IDS[2],
-        "CAND_3": CAND_IDS[3],
-        "CAND_4": CAND_IDS[4],
-        "CAND_5": CAND_IDS[5],
-        "CAND_6": CAND_IDS[6],
-        "CAND_7": CAND_IDS[7],
-        "CAND_8": CAND_IDS[8],
-        "CAND_9": CAND_IDS[9],
-        "CAND_END": CAND_END_ID,
-        "BYTE_VOCAB": BYTE_VOCAB,
-        "VOCAB_SIZE": VOCAB_SIZE,
     }
+    for i, token_id in enumerate(CAND_IDS):
+        mapping[f"CAND_{i}"] = token_id
+    mapping["CAND_END"] = CAND_END_ID
+    mapping["MASK"] = MASK_ID
+    mapping["BYTE_VOCAB"] = BYTE_VOCAB
+    mapping["VOCAB_SIZE"] = VOCAB_SIZE
+    return mapping
 
 
 def is_special_id(token_id: int) -> bool:
@@ -96,13 +90,18 @@ def assert_vocab_complete() -> None:
         "TYPO_START": 261,
         "TYPO_END": 262,
         "CAND_0": 263,
-        "CAND_9": 272,
-        "CAND_END": 273,
-        "VOCAB_SIZE": 274,
+        f"CAND_{N_CANDIDATE_SLOTS - 1}": 263 + N_CANDIDATE_SLOTS - 1,
+        "CAND_END": 263 + N_CANDIDATE_SLOTS,
+        "MASK": 264 + N_CANDIDATE_SLOTS,
+        "VOCAB_SIZE": 265 + N_CANDIDATE_SLOTS,
     }
     for key, value in expected.items():
         if names[key] != value:
             raise RuntimeError(f"special token {key} expected {value}, got {names[key]}")
+    # IDs must be contiguous and unique.
+    ids = [v for k, v in names.items() if k not in ("BYTE_VOCAB", "VOCAB_SIZE")]
+    if sorted(ids) != list(range(BYTE_VOCAB, VOCAB_SIZE)):
+        raise RuntimeError("special token IDs are not a contiguous block")
 
 
 def dump_special_tokens() -> Mapping[str, int]:

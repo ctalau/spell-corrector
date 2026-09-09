@@ -5,10 +5,11 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Any
 
+import numpy as np
 import pandas as pd
 import pyarrow.parquet as pq
 import torch
-from torch.utils.data import Dataset
+from torch.utils.data import Dataset, Sampler
 
 from spelling_reranker.serialization import (
     DEFAULT_MAX_SEQ_LEN,
@@ -71,6 +72,23 @@ class SpellingParquetDataset(Dataset):
             frame = frame.iloc[: int(max_examples)].copy()
         self.frame = frame.reset_index(drop=True)
         self.max_seq_len = max_seq_len
+        self._lengths: np.ndarray | None = None
+
+    @property
+    def lengths(self) -> np.ndarray:
+        """Approximate serialized length per row, for length-bucketed batching."""
+        if self._lengths is None:
+            frame = self.frame
+
+            def _blen(series) -> np.ndarray:
+                return series.fillna("").astype(str).str.len().to_numpy()
+
+            total = _blen(frame["context_before"]) + _blen(frame["typo"]) + _blen(frame["context_after"])
+            for col in CAND_COLUMNS:
+                total = total + _blen(frame[col]) + 2
+            total = total + 6
+            self._lengths = np.minimum(total, self.max_seq_len).astype(np.int32)
+        return self._lengths
 
     def __len__(self) -> int:
         return len(self.frame)
@@ -90,12 +108,12 @@ def collate_examples(
 ) -> dict[str, torch.Tensor]:
     padded = pad_batch(examples, max_seq_len=max_seq_len)
     return {
-        "token_ids": torch.tensor(padded["token_ids"], dtype=torch.long),
-        "attention_mask": torch.tensor(padded["attention_mask"], dtype=torch.long),
-        "typo_mask": torch.tensor(padded["typo_mask"], dtype=torch.long),
-        "candidate_masks": torch.tensor(padded["candidate_masks"], dtype=torch.long),
-        "candidate_valid": torch.tensor(padded["candidate_valid"], dtype=torch.long),
-        "gold_index": torch.tensor(padded["gold_index"], dtype=torch.long),
+        "token_ids": torch.from_numpy(padded["token_ids"]),
+        "attention_mask": torch.from_numpy(padded["attention_mask"]),
+        "typo_mask": torch.from_numpy(padded["typo_mask"]),
+        "candidate_masks": torch.from_numpy(padded["candidate_masks"]),
+        "candidate_valid": torch.from_numpy(padded["candidate_valid"]),
+        "gold_index": torch.from_numpy(padded["gold_index"]),
     }
 
 
@@ -104,3 +122,58 @@ def make_collate(max_seq_len: int | None = None):
         return collate_examples(examples, max_seq_len=max_seq_len)
 
     return _collate
+
+
+class LengthBucketBatchSampler(Sampler[list[int]]):
+    """Batch indices of similar serialized length together.
+
+    Sequences here vary from ~120 to 448 bytes, and a batch is padded to its
+    longest member, so random batching wastes a large fraction of every forward
+    pass on padding. Shuffling, then sorting inside a large window, then
+    shuffling the resulting batches keeps the sampling close to random while
+    cutting padded tokens substantially.
+    """
+
+    def __init__(
+        self,
+        lengths: "np.ndarray",
+        batch_size: int,
+        *,
+        shuffle: bool = True,
+        window_batches: int = 64,
+        seed: int = 0,
+        drop_last: bool = False,
+    ) -> None:
+        self.lengths = lengths
+        self.batch_size = int(batch_size)
+        self.shuffle = shuffle
+        self.window = max(1, int(window_batches)) * self.batch_size
+        self.seed = int(seed)
+        self.drop_last = drop_last
+        self.epoch = 0
+
+    def set_epoch(self, epoch: int) -> None:
+        self.epoch = int(epoch)
+
+    def __len__(self) -> int:
+        n = len(self.lengths)
+        if self.drop_last:
+            return n // self.batch_size
+        return (n + self.batch_size - 1) // self.batch_size
+
+    def __iter__(self):
+        n = len(self.lengths)
+        rng = np.random.default_rng(self.seed + self.epoch)
+        order = rng.permutation(n) if self.shuffle else np.arange(n)
+        batches: list[list[int]] = []
+        for start in range(0, n, self.window):
+            window = order[start : start + self.window]
+            window = window[np.argsort(self.lengths[window], kind="stable")]
+            for b_start in range(0, len(window), self.batch_size):
+                batch = window[b_start : b_start + self.batch_size]
+                if self.drop_last and len(batch) < self.batch_size:
+                    continue
+                batches.append([int(i) for i in batch])
+        if self.shuffle:
+            rng.shuffle(batches)
+        return iter(batches)

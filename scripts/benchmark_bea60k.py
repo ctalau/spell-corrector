@@ -16,9 +16,11 @@ if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
 from spelling_reranker.aspell import AspellEngine, aspell_metadata
-from spelling_reranker.byte_encoding import nfc
+from spelling_reranker.byte_encoding import N_CANDIDATE_SLOTS, nfc
+from spelling_reranker.candidates import build_pool, pad_pool
 from spelling_reranker.hunspell import default_engine
 from spelling_reranker.inference import load_model_dir, predict_index
+from spelling_reranker.serialization import MAX_CANDIDATE_BYTES
 
 
 def align_errors(noisy: str, clean: str) -> list[dict]:
@@ -66,16 +68,7 @@ def load_bea_pairs(bea_dir: Path) -> list[tuple[str, str]]:
 
 
 HIST_KEYS = [
-    "0",
-    "1",
-    "2",
-    "3",
-    "4",
-    "5",
-    "6",
-    "7",
-    "8",
-    "9",
+    *[str(i) for i in range(N_CANDIDATE_SLOTS)],
     "present_later",
     "not_present",
     "hunspell_did_not_flag",
@@ -91,7 +84,7 @@ def classify_gold_position(flagged: bool, suggestions: list[str], gold: str) -> 
         return "hunspell_no_suggestions"
     for i, cand in enumerate(suggestions):
         if nfc(cand) == gold_n:
-            return str(i) if i <= 9 else "present_later"
+            return str(i) if i < N_CANDIDATE_SLOTS else "present_later"
     return "not_present"
 
 
@@ -162,6 +155,7 @@ def main() -> int:
     hunspell_detect = 0
     hunspell_top1 = 0
     hunspell_oracle10 = 0
+    hunspell_oracle_at_10_legacy = 0
     model_overall = 0
     model_conditional_n = 0
     model_conditional_ok = 0
@@ -179,7 +173,9 @@ def main() -> int:
             typo, gold = err["typo"], err["gold"]
             flagged = not hunspell.spell(typo)
             suggestions = hunspell.suggest(typo)
-            top10 = suggestions[:10]
+            top10 = build_pool(
+                suggestions, limit=N_CANDIDATE_SLOTS, max_bytes=MAX_CANDIDATE_BYTES
+            )
             bucket = classify_gold_position(flagged, suggestions, gold)
             hist[bucket] += 1
             if flagged:
@@ -191,6 +187,8 @@ def main() -> int:
                 hunspell_top1 += 1
             if in_top10:
                 hunspell_oracle10 += 1
+            if any(nfc(c) == gold_n for c in suggestions[:10]):
+                hunspell_oracle_at_10_legacy += 1
 
             aspell_ok = False
             if aspell is not None:
@@ -203,7 +201,7 @@ def main() -> int:
             model_word = None
             model_ok = False
             if model is not None and in_top10:
-                padded: list[str | None] = list(top10) + [None] * (10 - len(top10))
+                padded: list[str | None] = pad_pool(top10, N_CANDIDATE_SLOTS)
                 model_idx = predict_index(
                     model,
                     err["context_before"],
@@ -262,7 +260,9 @@ def main() -> int:
         "n_word_errors": n,
         "hunspell_detection_rate": hunspell_detect / n if n else 0.0,
         "hunspell_top1": hunspell_top1 / n if n else 0.0,
-        "hunspell_oracle_at_10": hunspell_oracle10 / n if n else 0.0,
+        "n_candidate_slots": N_CANDIDATE_SLOTS,
+        "hunspell_oracle_at_slots": hunspell_oracle10 / n if n else 0.0,
+        "hunspell_oracle_at_10": hunspell_oracle_at_10_legacy / n if n else 0.0,
         "model_overall_success": overall_model if model is not None else None,
         "model_conditional_accuracy": (
             model_conditional_ok / model_conditional_n if model is not None and model_conditional_n else None

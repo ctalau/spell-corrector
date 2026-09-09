@@ -1,0 +1,37 @@
+{
+  "source": "https://en.wikipedia.org/wiki/Wikipedia:Lists_of_common_misspellings/For_machines?action=raw",
+  "note": "Public misspelling list, independent of any held-out benchmark.",
+  "real": {
+    "n": 4258,
+    "edit_distance_pct": {
+      "1": 72.55,
+      "2": 25.01,
+      "3": 2.44
+    },
+    "hunspell_gold_rank_pct": {
+      "0": 80.11,
+      "1-9": 13.72,
+      "10-15": 0.05,
+      "absent": 5.31,
+      "not_flagged": 0.82
+    },
+    "mean_suggestions": 4.17,
+    "pct_with_10plus_suggestions": 2.87
+  },
+  "synthetic": {
+    "n": 4000,
+    "edit_distance_pct": {
+      "1": 73.28,
+      "2": 21.8,
+      "3": 4.92
+    },
+    "hunspell_gold_rank_pct": {
+      "0": 81.08,
+      "1-9": 10.53,
+      "10-15": 0.17,
+      "absent": 8.22
+    },
+    "mean_suggestions": 3.33,
+    "pct_with_10plus_suggestions": 2.52
+  }
+}

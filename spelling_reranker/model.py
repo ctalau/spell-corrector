@@ -9,7 +9,7 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 
-from spelling_reranker.byte_encoding import PAD_ID, VOCAB_SIZE
+from spelling_reranker.byte_encoding import MASK_ID, N_CANDIDATE_SLOTS, PAD_ID, VOCAB_SIZE
 
 
 @dataclass
@@ -22,13 +22,16 @@ class ModelConfig:
     ffn_hidden: int = 1536
     dropout: float = 0.10
     attn_dropout: float = 0.00
-    max_seq_len: int = 384
-    n_candidates: int = 10
+    max_seq_len: int = 448
+    n_candidates: int = N_CANDIDATE_SLOTS
     score_hidden: int = 320
     score_dropout: float = 0.10
     rms_norm_eps: float = 1e-6
     rope_theta: float = 10000.0
     pad_id: int = PAD_ID
+    #: Auxiliary masked-byte head. Training-only; adds ~0.2M parameters and is
+    #: never used at inference.
+    mlm_head: bool = True
 
     def to_dict(self) -> dict:
         return asdict(self)
@@ -167,11 +170,19 @@ class TransformerBlock(nn.Module):
         return x
 
 
+#: Features fed to the scoring head, per candidate:
+#: [candidate, typo, context(CLS), candidate*typo, |candidate-typo|].
+#: The last two are the standard sentence-pair matching interaction terms; they
+#: let the head compare a candidate against the typo directly instead of having
+#: to rediscover the comparison inside a single linear layer.
+SCORE_FEATURES = 5
+
+
 class ScoringHead(nn.Module):
     def __init__(self, cfg: ModelConfig) -> None:
         super().__init__()
         self.net = nn.Sequential(
-            nn.Linear(cfg.d_model * 3, cfg.score_hidden),
+            nn.Linear(cfg.d_model * SCORE_FEATURES, cfg.score_hidden),
             nn.SiLU(),
             nn.Dropout(cfg.score_dropout),
             nn.Linear(cfg.score_hidden, 1),
@@ -192,6 +203,14 @@ class ByteSpellingReranker(nn.Module):
         self.blocks = nn.ModuleList(TransformerBlock(cfg) for _ in range(cfg.n_layers))
         self.final_norm = RMSNorm(cfg.d_model, cfg.rms_norm_eps)
         self.score_head = ScoringHead(cfg)
+        # Auxiliary masked-byte objective. The reranking signal alone teaches
+        # the encoder very little English: it only ever says which of a handful
+        # of candidates fits. Predicting masked context bytes in the same
+        # forward pass gives the encoder an actual language-modelling gradient,
+        # which is what the "pick the candidate that fits the sentence" half of
+        # the task depends on. Weight is decayed to zero during training so the
+        # final phase optimises reranking alone.
+        self.mlm_head = nn.Linear(cfg.d_model, cfg.vocab_size, bias=False) if cfg.mlm_head else None
 
     def encode(self, token_ids: torch.Tensor, attention_mask: torch.Tensor) -> torch.Tensor:
         hidden = self.embed_dropout(self.embed(token_ids))
@@ -212,24 +231,79 @@ class ByteSpellingReranker(nn.Module):
         typo_mask: torch.Tensor,
         candidate_masks: torch.Tensor,
         candidate_valid: torch.Tensor,
-    ) -> torch.Tensor:
-        """Return logits of shape [batch, 10]. Invalid candidates are -inf."""
+        return_hidden: bool = False,
+    ) -> torch.Tensor | tuple[torch.Tensor, torch.Tensor]:
+        """Return logits of shape [batch, n_candidates]. Invalid slots are -inf."""
         hidden = self.encode(token_ids, attention_mask)
         context_repr = hidden[:, 0, :]
         typo_repr = self._masked_mean(hidden, typo_mask)
 
-        # candidate_masks: [B, 10, T]
-        cand_weights = candidate_masks.to(hidden.dtype).unsqueeze(-1)
-        cand_denom = cand_weights.sum(dim=2).clamp(min=1e-6)
-        cand_repr = (hidden.unsqueeze(1) * cand_weights).sum(dim=2) / cand_denom
+        # candidate_masks: [B, C, T]. Pooling as a batched matmul keeps the
+        # intermediate at [B, C, D]; the elementwise form would materialise
+        # [B, C, T, D] (~1 GB for B=128, C=16, T=448, D=512) and was what drove
+        # the 22 GiB peak in the first experiment.
+        cand_weights = candidate_masks.to(hidden.dtype)
+        cand_denom = cand_weights.sum(dim=2).clamp(min=1e-6).unsqueeze(-1)
+        cand_repr = torch.bmm(cand_weights, hidden) / cand_denom
 
         typo_exp = typo_repr.unsqueeze(1).expand_as(cand_repr)
         ctx_exp = context_repr.unsqueeze(1).expand_as(cand_repr)
-        features = torch.cat([cand_repr, typo_exp, ctx_exp], dim=-1)
+        features = torch.cat(
+            [
+                cand_repr,
+                typo_exp,
+                ctx_exp,
+                cand_repr * typo_exp,
+                (cand_repr - typo_exp).abs(),
+            ],
+            dim=-1,
+        )
         logits = self.score_head(features)
         invalid = candidate_valid == 0
         logits = logits.masked_fill(invalid, torch.finfo(logits.dtype).min)
+        if return_hidden:
+            return logits, hidden
         return logits
+
+
+def apply_byte_masking(
+    token_ids: torch.Tensor,
+    attention_mask: torch.Tensor,
+    typo_mask: torch.Tensor,
+    candidate_masks: torch.Tensor,
+    *,
+    probability: float,
+    generator: torch.Generator | None = None,
+) -> tuple[torch.Tensor, torch.Tensor]:
+    """Mask a fraction of *context* bytes for the auxiliary objective.
+
+    Only raw byte positions in the context are eligible: the typo, the
+    candidate strings and every structural token are left intact, so the
+    reranking task itself is never made unanswerable.
+
+    Returns (masked token_ids, labels) where labels is -100 off the masked
+    positions.
+    """
+    eligible = (
+        (attention_mask != 0)
+        & (typo_mask == 0)
+        & (candidate_masks.sum(dim=1) == 0)
+        & (token_ids < 256)
+    )
+    draw = torch.rand(token_ids.shape, device=token_ids.device, generator=generator)
+    selected = eligible & (draw < probability)
+    labels = torch.where(selected, token_ids, torch.full_like(token_ids, -100))
+    masked = torch.where(selected, torch.full_like(token_ids, MASK_ID), token_ids)
+    return masked, labels
+
+
+def masked_byte_loss(hidden: torch.Tensor, head: nn.Linear, labels: torch.Tensor) -> torch.Tensor:
+    """Cross-entropy over the masked byte positions only."""
+    selected = labels != -100
+    if not bool(selected.any()):
+        return hidden.sum() * 0.0
+    logits = head(hidden[selected])
+    return F.cross_entropy(logits, labels[selected])
 
 
 def masked_cross_entropy(logits: torch.Tensor, gold_index: torch.Tensor) -> torch.Tensor:

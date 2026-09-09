@@ -1,0 +1,20 @@
+# ~87M byte-level bidirectional Transformer reranker.
+#
+# Scaled up from the 28M first experiment. With Hunspell fixed as the only
+# candidate source the oracle ceiling is ~81%, so reaching 75% overall requires
+# ~92% accuracy *given* the gold repair is in the pool -- capacity to model
+# English context is the binding constraint, not the candidate list.
+vocab_size: 280            # 256 bytes + 24 specials (16 candidate slots)
+layers: 12
+d_model: 768
+attention_heads: 12
+head_dim: 64
+ffn_hidden: 2048
+dropout: 0.05
+attention_dropout: 0.00
+max_sequence_bytes: 448
+n_candidates: 16
+score_hidden: 512
+score_dropout: 0.05
+rms_norm_eps: 1.0e-6
+rope_theta: 10000.0

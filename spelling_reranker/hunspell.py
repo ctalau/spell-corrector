@@ -11,11 +11,14 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Sequence
 
-from spelling_reranker.byte_encoding import nfc
+from spelling_reranker.byte_encoding import N_CANDIDATE_SLOTS, nfc
 
 DEFAULT_DIC = Path("/usr/share/hunspell/en_US.dic")
 DEFAULT_AFF = Path("/usr/share/hunspell/en_US.aff")
-MAX_CANDIDATES = 10
+#: Hunspell's suggestion list is kept to the width of the model's candidate
+#: slots rather than truncated at 10. Most typos yield fewer suggestions than
+#: this, so the extra slots are usually free.
+MAX_CANDIDATES = N_CANDIDATE_SLOTS
 
 
 def _sha256_file(path: Path) -> str:

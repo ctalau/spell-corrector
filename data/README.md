@@ -12,18 +12,34 @@ synthetic examples inherit ShareAlike obligations. Attribution: Merity et al.,
 
 **What is stored here**
 
-Prepared parquet under `data/processed/` contains **synthetic typos** only:
+Prepared parquet under `data/processed/` contains **synthetic typos** only.
+The build runs in three passes:
 
-1. Take a clean WikiText sentence/document from the official train or valid
-   split (no cross-split leakage).
-2. Pick an alphabetic dictionary word (length ~3–25).
-3. Apply one corruption (keyboard adjacency, random substitution, delete,
-   insert, transpose, duplicate, or a common English pattern).
-4. Keep the example only if Hunspell flags the typo **and** the original word
-   appears in Hunspell's first 10 suggestions.
+1. **Vocabulary.** Count eligible alphabetic words (length ~3–25) over the
+   official WikiText train split. The most frequent `--vocab-size` are kept, so
+   training effort follows the words people actually write.
+2. **Typo table.** For each word, generate distinct typos and ask Hunspell to
+   flag and suggest for each one. A `(word, typo)` pair is kept only if
+   Hunspell flags the typo **and** the original word appears in Hunspell's
+   suggestion list (16 slots). Hunspell is called once per *unique typo* here,
+   which is why build cost does not scale with the number of examples.
+3. **Instantiation.** Stream sentences from the official split (no cross-split
+   leakage) and drop a precomputed typo into each. With probability
+   `--context-noise-prob`, neighbouring words are corrupted too, because a
+   spell corrector reads text the writer has not yet corrected.
+
+Corruptions compose 1–3 primitive edits drawn from keyboard adjacency, random
+substitution, deletion, insertion, transposition, consonant doubling, silent
+letters, unstressed-vowel respelling, and a phonetic/orthographic rule set. The
+mixture is calibrated so the realised edit-distance distribution matches
+authentic human misspellings — see `scripts/calibrate_typo_model.py`, which uses
+Wikipedia's public common-misspellings list and never the held-out benchmark.
+
+Examples where Hunspell already ranks the answer first are capped at
+`--gold0-fraction`; they teach the reranker only to agree with Hunspell.
 
 Schema: `example_id`, `source`, `context_before`, `typo`, `context_after`,
-`gold`, `cand_0`…`cand_9`, `gold_index`, `corruption_type`,
+`gold`, `cand_0`…`cand_15`, `gold_index`, `corruption_type`,
 `source_document_id`, `original_sentence_hash`.
 
 RNG seed: **1337**. Rebuild:
@@ -73,3 +89,17 @@ benchmark only**.
   downloader, recorded checksums after a local run, and metric reports instead.
 
 Upstream shared task: [BEA-2019](https://www.cl.cam.ac.uk/research/nl/bea2019st/).
+
+## Typo-generator calibration list
+
+`data/wikipedia_misspellings.txt` is a copy of Wikipedia's
+[Lists of common misspellings (machine-readable)](https://en.wikipedia.org/wiki/Wikipedia:Lists_of_common_misspellings/For_machines),
+~4.3k authentic `misspelling->correction` pairs.
+
+**License:** CC BY-SA, same as WikiText. Attribution: Wikipedia contributors.
+
+It is vendored rather than fetched so that calibration is reproducible and does
+not depend on a network call (Wikipedia also rejects unidentified clients with
+403). It is used only to check that the synthetic typo distribution resembles
+authentic human misspellings — see `scripts/calibrate_typo_model.py`. It is
+**not** training data, and it is not the held-out benchmark.

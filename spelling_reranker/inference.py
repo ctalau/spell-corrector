@@ -10,7 +10,7 @@ from safetensors.torch import load_file
 
 from spelling_reranker.dataset import collate_examples
 from spelling_reranker.model import ByteSpellingReranker, ModelConfig
-from spelling_reranker.serialization import serialize_example
+from spelling_reranker.serialization import PathologicalExampleError, serialize_example
 
 
 def load_model_dir(model_dir: str | Path, device: torch.device | None = None) -> ByteSpellingReranker:
@@ -77,3 +77,56 @@ def predict_word(
     if idx < 0 or idx >= len(candidates):
         return None
     return candidates[idx]
+
+
+@torch.no_grad()
+def predict_indices(
+    model: ByteSpellingReranker,
+    items: list[tuple[str, str, str, list[str | None]]],
+    *,
+    device: torch.device | None = None,
+    batch_size: int = 128,
+) -> list[int]:
+    """Batched form of `predict_index`.
+
+    `items` are (context_before, typo, context_after, candidates) tuples. The
+    benchmark scores tens of thousands of errors, and one forward pass each
+    leaves the GPU almost idle.
+    """
+    device = device or next(model.parameters()).device
+    out: list[int] = []
+    for start in range(0, len(items), batch_size):
+        chunk = items[start : start + batch_size]
+        serialized = []
+        fallback: list[int] = []
+        for offset, (before, typo, after, cands) in enumerate(chunk):
+            try:
+                serialized.append(
+                    serialize_example(before, typo, after, cands, max_seq_len=model.cfg.max_seq_len)
+                )
+            except PathologicalExampleError:
+                # Should not happen: DEFAULT_MAX_SEQ_LEN is sized so a full pool
+                # always fits. Degrade to the first candidate rather than abort a
+                # sweep of tens of thousands of errors over one freak input.
+                fallback.append(offset)
+        if fallback and not serialized:
+            out.extend(0 for _ in chunk)
+            continue
+        batch = collate_examples(serialized)
+        batch = {k: v.to(device) for k, v in batch.items() if k != "gold_index"}
+        logits = model(
+            batch["token_ids"],
+            batch["attention_mask"],
+            batch["typo_mask"],
+            batch["candidate_masks"],
+            batch["candidate_valid"],
+        )
+        picked = [int(i) for i in logits.argmax(dim=-1).tolist()]
+        if fallback:
+            merged: list[int] = []
+            it = iter(picked)
+            for offset in range(len(chunk)):
+                merged.append(0 if offset in fallback else next(it))
+            picked = merged
+        out.extend(picked)
+    return out

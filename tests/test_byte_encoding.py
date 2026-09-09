@@ -3,7 +3,10 @@
 from __future__ import annotations
 
 from spelling_reranker.byte_encoding import (
+    BYTE_VOCAB,
+    N_CANDIDATE_SLOTS,
     VOCAB_SIZE,
+    assert_vocab_complete,
     byte_ids_to_text,
     nfc,
     special_tokens_map,
@@ -39,8 +42,16 @@ def test_nfc_does_not_lowercase() -> None:
 
 def test_vocab_size_and_specials() -> None:
     tokens = special_tokens_map()
-    assert tokens["VOCAB_SIZE"] == 274
-    assert VOCAB_SIZE == 274
+    # 256 raw bytes + 7 structural specials + one token per candidate slot
+    # + CAND_END + MASK.
+    expected_vocab = BYTE_VOCAB + 9 + N_CANDIDATE_SLOTS
+    assert VOCAB_SIZE == expected_vocab
+    assert tokens["VOCAB_SIZE"] == expected_vocab
     assert tokens["CAND_0"] == 263
-    assert tokens["CAND_9"] == 272
-    assert tokens["CAND_END"] == 273
+    assert tokens[f"CAND_{N_CANDIDATE_SLOTS - 1}"] == 263 + N_CANDIDATE_SLOTS - 1
+    assert tokens["CAND_END"] == 263 + N_CANDIDATE_SLOTS
+    assert tokens["MASK"] == 264 + N_CANDIDATE_SLOTS
+
+
+def test_special_token_ids_are_a_contiguous_block() -> None:
+    assert_vocab_complete()

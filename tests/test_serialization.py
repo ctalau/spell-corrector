@@ -8,6 +8,7 @@ from spelling_reranker.byte_encoding import (
     CAND_END_ID,
     CAND_IDS,
     CLS_ID,
+    N_CANDIDATE_SLOTS,
     TYPO_END_ID,
     TYPO_START_ID,
     byte_ids_to_text,
@@ -21,7 +22,7 @@ from spelling_reranker.serialization import (
 from spelling_reranker.dataset import collate_examples
 
 
-def _example(n_cands: int = 10):
+def _example(n_cands: int = N_CANDIDATE_SLOTS):
     cands = [f"cand{i}" for i in range(n_cands)]
     return serialize_example(
         "The left ",
@@ -74,8 +75,8 @@ def test_gold_index_points_to_exact_candidate() -> None:
 def test_padding_masks_missing_candidates() -> None:
     cands = ["the", "eh", "tech"]
     ex = serialize_example("See ", "teh", ".", cands, gold_index=0)
-    assert ex.candidate_valid == [True, True, True, False, False, False, False, False, False, False]
-    for i in range(3, 10):
+    assert ex.candidate_valid == [True, True, True] + [False] * (N_CANDIDATE_SLOTS - 3)
+    for i in range(3, N_CANDIDATE_SLOTS):
         assert ex.candidate_positions[i] == []
 
     model = ByteSpellingReranker(ModelConfig(n_layers=1, max_seq_len=64))
@@ -89,8 +90,45 @@ def test_padding_masks_missing_candidates() -> None:
             batch["candidate_masks"],
             batch["candidate_valid"],
         )
-    assert logits.shape == (1, 10)
+    assert logits.shape == (1, N_CANDIDATE_SLOTS)
     assert torch.isneginf(logits[0, 3:]).all() or (logits[0, 3:] <= torch.finfo(logits.dtype).min / 2).all()
     probs = torch.softmax(logits[0, :3], dim=0)
     assert torch.isfinite(probs).all()
     assert torch.isclose(probs.sum(), torch.tensor(1.0), atol=1e-5)
+
+
+def test_realistic_candidate_pools_fit_comfortably() -> None:
+    """Realistic pools leave plenty of headroom.
+
+    Measured over 4,000 real BEA-60K errors the worst serialized fixed cost is
+    169 bytes of the 448 budget, because Hunspell returns short lists of short
+    words.
+    """
+    from spelling_reranker.serialization import DEFAULT_MAX_SEQ_LEN
+
+    cands = ["misspelling"] * N_CANDIDATE_SLOTS
+    ex = serialize_example("left context ", "mispeling", " right context", cands)
+    assert ex.seq_len <= DEFAULT_MAX_SEQ_LEN
+    assert all(ex.candidate_valid)
+
+
+def test_pathological_input_degrades_instead_of_raising() -> None:
+    """A freak oversized token falls back to candidate 0 rather than crashing.
+
+    The data build can discard a pathological example; the benchmark cannot,
+    because it only runs after training has already finished.
+    """
+    from spelling_reranker.inference import predict_indices
+    from spelling_reranker.model import ByteSpellingReranker, ModelConfig
+    from spelling_reranker.serialization import DEFAULT_MAX_SEQ_LEN
+
+    model = ByteSpellingReranker(ModelConfig(n_layers=1))
+    model.eval()
+    monster = "x" * (DEFAULT_MAX_SEQ_LEN + 200)
+    items = [
+        ("ctx ", monster, " after", ["aa", "bb"] + [None] * (N_CANDIDATE_SLOTS - 2)),
+        ("the ", "teh", " cat", ["the", "tea"] + [None] * (N_CANDIDATE_SLOTS - 2)),
+    ]
+    picked = predict_indices(model, items, batch_size=8)
+    assert len(picked) == 2
+    assert picked[0] == 0

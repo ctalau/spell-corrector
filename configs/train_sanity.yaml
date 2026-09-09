@@ -4,8 +4,8 @@ model: configs/model_28m.yaml
 data:
   train: data/processed/train.parquet
   validation: data/processed/validation.parquet
-  max_train_examples: 2000
-  max_val_examples: 500
+  max_train_examples: 4000
+  max_val_examples: 1000
 
 training:
   dtype: bf16
@@ -16,6 +16,11 @@ training:
   eps: 1.0e-8
   weight_decay: 0.10
   warmup_ratio: 0.05
+  min_lr_ratio: 0.05
+  # Auxiliary masked-byte objective (see spelling_reranker/model.py).
+  mlm_weight: 0.20
+  mlm_probability: 0.12
+  mlm_decay_frac: 0.60
   scheduler: cosine
   max_grad_norm: 1.0
   effective_batch_size: 256
@@ -24,12 +29,16 @@ training:
   num_workers: 2
   pin_memory: true
   compile: false
+  length_bucketing: true
+  bucket_window_batches: 16
   log_every: 5
   eval_every: 50
-  max_steps: 200
+  max_steps: 100
 
 output:
-  dir: artifacts
-  metrics_jsonl: artifacts/train_metrics.jsonl
-  summary_json: artifacts/train_summary.json
-  model_dir: artifacts/model
+  # Separate from the full run so a sanity pass never leaves a 28M checkpoint
+  # sitting where the real model is expected.
+  dir: artifacts/sanity
+  metrics_jsonl: artifacts/sanity/train_metrics.jsonl
+  summary_json: artifacts/sanity/train_summary.json
+  model_dir: artifacts/sanity/model

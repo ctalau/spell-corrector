@@ -1,21 +1,43 @@
 # Spell Corrector
 
-Tiny (~28M) **byte-level contextual spelling reranker**. Hunspell proposes up to 10
-candidates; a bidirectional Transformer picks exactly one.
+Byte-level **contextual spelling reranker**. Hunspell proposes candidates; a
+bidirectional Transformer picks exactly one.
 
-This repository is the first experiment from [PLAN.md](PLAN.md):
+This repository is the experiment line from [PLAN.md](PLAN.md):
 
 > Beat Aspell's top-1 spelling correction accuracy on BEA-60K.
 
-The model is **not** generative. Training labels are Hunspell ranks `0..9` on
-synthetic WikiText-103 typos. BEA-60K is a locked final benchmark and is never
-used for training, validation, or hyperparameter selection.
+The model is **not** generative. Training labels are Hunspell ranks on synthetic
+typos over WikiText-103. BEA-60K is a locked final benchmark and is never used
+for training, validation, or hyperparameter selection.
 
-## Status
+## Where the accuracy comes from
 
-- Code, configs, unit tests, and data pipeline: implemented.
-- Full GPU training / BEA numbers: run on a CUDA box (see below). Results go in
-  `reports/EXPERIMENT.md`.
+Experiment 1 reached **62.56%** overall (vs Aspell 60.55%). Decomposed:
+
+```
+overall = P(gold in Hunspell pool) x P(model picks gold | it is there)
+62.56%  =        80.38%            x            77.84%
+```
+
+Hunspell is fixed as the only candidate source, so the first factor is a hard
+ceiling around 81%. Everything in experiment 2 targets the second factor:
+
+| Change | Why |
+|---|---|
+| Typo generator rewritten | Experiment 1 generated **only** edit-distance-1 typos. Authentic misspellings are ~73% ED1 / ~25% ED2 / ~2% ED3+, and Hunspell's top-1 collapses as edit distance grows — the ED>=2 quarter is exactly where a reranker earns its keep, and the model had never seen it. |
+| Phonetic/orthographic corruptions | Real errors are how a writer *thinks* a word is spelled (doubling, silent letters, reduced vowels, suffix confusion), not uniform keyboard noise. |
+| Noisy context augmentation | A corrector reads uncorrected text, so neighbouring words are often misspelled too. Training on clean context taught the model to over-trust it. |
+| Gold-index balancing | Hunspell already ranks the answer first for ~81% of synthetic typos. Those examples only teach the model to agree with Hunspell. |
+| 16 candidate slots | Hunspell's suggestion list is no longer truncated at 10. |
+| ~17x more training data | Made affordable by the data-pipeline rewrite below. |
+| 87M parameters | Modelling English context is the binding constraint once the candidate list is fixed. |
+| Richer scoring head | Adds `cand*typo` and `abs(cand-typo)` interaction features. |
+
+Calibration of the typo generator uses Wikipedia's public
+[common misspellings list](https://en.wikipedia.org/wiki/Wikipedia:Lists_of_common_misspellings),
+never the benchmark — see `scripts/calibrate_typo_model.py` and
+`reports/typo_calibration.json`.
 
 ## Install
 
@@ -33,14 +55,25 @@ source .venv/bin/activate
 
 # GPU (Runpod / CUDA 12.x). Use the CPU index on machines without NVIDIA.
 pip install torch --index-url https://download.pytorch.org/whl/cu124
-# pip install torch --index-url https://download.pytorch.org/whl/cpu
 
 pip install -e ".[dev]"
-pip install -r requirements.lock
 ```
 
-`requirements.lock` pins versions. Install a platform-appropriate `torch` wheel
-**first** so the lockfile does not force a CPU-only build onto a GPU pod.
+The `hunspell` binding builds from source and fails against setuptools >= 60
+(`AttributeError: install_layout`). On Python 3.11 and older:
+
+```bash
+pip install "setuptools<60" wheel
+pip install --no-build-isolation hunspell==0.5.5
+```
+
+On Python 3.12 that workaround does not apply — there is no `distutils` for old
+setuptools to patch — so use the distro package, which is the same version
+already compiled for the interpreter:
+
+```bash
+sudo apt-get install -y python3-hunspell
+```
 
 Confirm Hunspell:
 
@@ -54,93 +87,67 @@ echo teh | hunspell -d en_US -a
 python -m pytest tests/ -q
 ```
 
-Section 11 of PLAN.md is covered by:
-
 | Test | File |
 |------|------|
-| Byte roundtrip | `tests/test_byte_encoding.py` |
-| Serialization spans | `tests/test_serialization.py` |
-| Gold label / padding | `tests/test_serialization.py`, `tests/test_dataset.py` |
-| Shape / param count / loss | `tests/test_model.py` |
+| Byte roundtrip, vocab contiguity | `tests/test_byte_encoding.py` |
+| Serialization spans, padding | `tests/test_serialization.py` |
+| Gold label, determinism, context noise, no benchmark leak | `tests/test_dataset.py` |
+| Typo realism vs the public misspelling list | `tests/test_typo_gen.py` |
+| Shapes, param counts, pooling equivalence, loss | `tests/test_model.py` |
 | Tiny overfit | `tests/test_tiny_overfit.py` |
-| Determinism | `tests/test_dataset.py` |
-| No locked-benchmark leak into train construction | `tests/test_dataset.py` |
 
-The parameter-count test prints the trainable size and asserts it is ≤29M and
-approximately 28M.
+`tests/test_dataset.py` fails the build if any training-construction file so
+much as mentions the locked benchmark.
 
 ## Build training data
 
-Synthetic only (WikiText-103 raw, CC BY-SA). No authentic typo corpus is
-redistributed. See [data/README.md](data/README.md).
+Synthetic only (WikiText-103 raw, CC BY-SA). See [data/README.md](data/README.md).
 
 ```bash
 python scripts/download_sources.py
-python scripts/build_training_data.py \
-  --target-train 240000 \
-  --target-valid 20000 \
-  --seed 1337
+python scripts/build_training_data.py --target-train 4000000 --target-valid 60000
 ```
 
-Minimum acceptable full run: 150k train / 10k valid. Outputs:
+Three passes: count the vocabulary, build a `word -> typos -> Hunspell pool`
+table, then instantiate examples by dropping precomputed typos into sentences.
+Hunspell is called once per **unique typo** rather than once per example, so
+build cost no longer scales with dataset size.
 
-- `data/processed/train.parquet`
-- `data/processed/validation.parquet`
-- `data/processed/data_stats.json`
-- `data/processed/manifest.json`
-- `artifacts/hunspell_metadata.json`
-
-Committed processed data (Git LFS): **235,626 train / 19,642 valid** examples
-(above the 150k/10k minimum; WikiText heading boilerplate filtered). Rebuild
-on the training machine if you want a fresh generation.
+Outputs: `data/processed/{train,validation}.parquet`, `data_stats.json`,
+`manifest.json`, `artifacts/hunspell_metadata.json`.
 
 ## Train
 
 ```bash
-# cheap sanity (~2k/500 examples, ≤200 optimizer steps)
-python scripts/train.py --config configs/train_sanity.yaml
-
-# full experiment
-python scripts/train.py --config configs/train_full.yaml
+python scripts/train.py --config configs/train_sanity.yaml   # cheap sanity
+python scripts/train.py --config configs/train_full.yaml     # full experiment
 ```
 
-On OOM, edit `configs/train_full.yaml` (`microbatch` 64 / `grad_accumulation` 4,
-or 32 / 8) so the effective batch stays 256.
+On OOM, lower `microbatch` and raise `grad_accumulation` in
+`configs/train_full.yaml` so the effective batch stays 512.
 
-Sanity wrapper (tests + sanity train + eval smoke):
-
-```bash
-bash scripts/run_sanity.sh
-```
-
-Checkpoints land in `artifacts/model/` (`model.safetensors`, `config.json`,
-`special_tokens.json`, `hunspell_metadata.json`, `training_manifest.json`).
+Checkpoints land in `artifacts/model/`.
 
 ## Benchmark BEA-60K
 
-Do **not** commit BEA files if redistribution is restricted. Download locally:
+Do **not** commit BEA files.
 
 ```bash
 python scripts/download_bea60k.py
 python scripts/benchmark_aspell.py
-python scripts/benchmark_bea60k.py \
-  --model artifacts/model \
-  --output reports/bea60k
+python scripts/benchmark_bea60k.py --model artifacts/model --output reports/bea60k
 ```
 
-Primary comparison: model overall success rate vs Aspell top-1 on the same
-extracted word errors.
+## GPU runs
 
-## Repository layout
-
-Matches PLAN.md §21: `spelling_reranker/`, `configs/`, `scripts/`, `tests/`,
-`data/`, `artifacts/`, `reports/`.
+See [scripts/runpod/README.md](scripts/runpod/README.md). Pods bill for as long
+as they exist — always finish with `scripts/runpod/terminate.py --all`.
 
 ## Design constraints
 
-- Byte vocabulary 0..255 plus 18 specials (274 total). No BPE/SPM.
-- One forward pass scores all 10 candidates.
-- Hunspell suggestion order is preserved (`CAND_0`…`CAND_9`).
+- Byte vocabulary 0..255 plus 24 specials (280 total). No BPE/SPM.
+- One forward pass scores all candidates.
+- Hunspell suggestion order is preserved (`CAND_0`…`CAND_15`).
+- Hunspell is the only candidate generator.
 - Unicode NFC; no global lowercasing.
 - Seed **1337** for data and training.
-- Git LFS tracks `*.parquet`, `*.safetensors`, `*.pt`, `*.bin`.

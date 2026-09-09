@@ -14,10 +14,14 @@ if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
 from spelling_reranker.data_build import (
-    collect_sentence_jobs,
-    generate_examples,
-    iter_wikitext_articles,
-    write_processed,
+    BuildStats,
+    build_typo_table,
+    count_vocabulary,
+    iter_examples,
+    iter_sentences,
+    select_vocabulary,
+    write_manifest,
+    write_split,
 )
 from spelling_reranker.hunspell import default_engine, write_hunspell_metadata
 from spelling_reranker.seed import DEFAULT_SEED
@@ -36,11 +40,20 @@ def main() -> int:
     parser.add_argument("--raw-dir", type=Path, default=ROOT / "data" / "raw")
     parser.add_argument("--out-dir", type=Path, default=ROOT / "data" / "processed")
     parser.add_argument("--seed", type=int, default=DEFAULT_SEED)
-    parser.add_argument("--target-train", type=int, default=240_000)
-    parser.add_argument("--target-valid", type=int, default=20_000)
+    parser.add_argument("--target-train", type=int, default=3_000_000)
+    parser.add_argument("--max-passes", type=int, default=3)
+    parser.add_argument("--target-valid", type=int, default=60_000)
+    # Hunspell's suggest() costs ~45 ms per unique typo and is the dominant
+    # cost of the whole build, so the vocabulary and typos-per-word settings
+    # are chosen to keep the number of *unique* typos near 600k.
+    parser.add_argument("--vocab-size", type=int, default=60_000)
+    parser.add_argument("--min-typos", type=int, default=4)
+    parser.add_argument("--max-typos", type=int, default=24)
+    parser.add_argument("--context-noise-prob", type=float, default=0.25)
+    parser.add_argument("--gold0-fraction", type=float, default=0.65)
+    parser.add_argument("--max-uses-per-typo", type=int, default=8)
     parser.add_argument("--max-train-articles", type=int, default=None)
     parser.add_argument("--max-valid-articles", type=int, default=None)
-    parser.add_argument("--max-attempts-per-sentence", type=int, default=6)
     parser.add_argument("--workers", type=int, default=None, help="Process workers (default: CPU count)")
     args = parser.parse_args()
 
@@ -58,54 +71,84 @@ def main() -> int:
         "split_policy": "official WikiText train/valid article files",
     }
 
-    print("collecting train sentences...")
-    train_jobs = collect_sentence_jobs(
-        iter_wikitext_articles(train_raw),
-        split_name="train",
-        source="wikitext103-synthetic",
-        max_articles=args.max_train_articles,
-    )
-    print(f"train sentences with eligible words: {len(train_jobs)}")
-    print("collecting validation sentences...")
-    valid_jobs = collect_sentence_jobs(
-        iter_wikitext_articles(valid_raw),
-        split_name="valid",
-        source="wikitext103-synthetic",
-        max_articles=args.max_valid_articles,
-    )
-    print(f"valid sentences with eligible words: {len(valid_jobs)}")
-
-    engine = default_engine()
     started = time.time()
-    train_rows, train_stats = generate_examples(
-        train_jobs,
-        target=args.target_train,
+
+    print("pass 1: counting vocabulary...", flush=True)
+    counts = count_vocabulary(train_raw, max_articles=args.max_train_articles)
+    vocabulary = select_vocabulary(counts, vocab_size=args.vocab_size)
+    print(f"  eligible word types: {len(counts):,} -> vocabulary {len(vocabulary):,}", flush=True)
+    t_vocab = time.time()
+
+    print("pass 2: building typo table (Hunspell)...", flush=True)
+    typo_table, table_stats = build_typo_table(
+        vocabulary,
         seed=args.seed,
-        engine=engine,
-        max_attempts_per_sentence=args.max_attempts_per_sentence,
         workers=args.workers,
+        min_typos=args.min_typos,
+        max_typos=args.max_typos,
     )
-    valid_rows, valid_stats = generate_examples(
-        valid_jobs,
-        target=args.target_valid,
-        seed=args.seed + 1,
-        engine=engine,
-        max_attempts_per_sentence=args.max_attempts_per_sentence,
-        workers=args.workers,
+    n_entries = sum(len(v) for v in typo_table.values())
+    print(f"  words with usable typos: {len(typo_table):,}; entries: {n_entries:,}", flush=True)
+    t_table = time.time()
+
+    print("pass 3: instantiating examples...", flush=True)
+    common = dict(
+        context_noise_prob=args.context_noise_prob,
+        gold0_fraction=args.gold0_fraction,
+        max_uses_per_typo=args.max_uses_per_typo,
+        max_passes=args.max_passes,
+    )
+    train_stats = BuildStats()
+    n_train = write_split(
+        iter_examples(
+            lambda: iter_sentences(train_raw, max_articles=args.max_train_articles),
+            typo_table,
+            target=args.target_train,
+            seed=args.seed,
+            stats=train_stats,
+            **common,
+        ),
+        args.out_dir / "train.parquet",
+    )
+    valid_stats = BuildStats()
+    n_valid = write_split(
+        iter_examples(
+            lambda: iter_sentences(valid_raw, max_articles=args.max_valid_articles),
+            typo_table,
+            target=args.target_valid,
+            seed=args.seed + 1,
+            stats=valid_stats,
+            **common,
+        ),
+        args.out_dir / "validation.parquet",
     )
     elapsed = time.time() - started
-    manifest = write_processed(
-        train_rows,
-        valid_rows,
+
+    manifest = write_manifest(
+        n_train,
+        n_valid,
         out_dir=args.out_dir,
         seed=args.seed,
         source_meta=source_meta,
         train_stats=train_stats,
         valid_stats=valid_stats,
         elapsed_sec=elapsed,
+        extra={
+            "typo_table": {
+                "vocabulary": len(vocabulary),
+                "words_with_typos": len(typo_table),
+                "entries": n_entries,
+                "stats": dict(table_stats),
+            },
+            "phase_seconds": {
+                "vocabulary": t_vocab - started,
+                "typo_table": t_table - t_vocab,
+                "examples": time.time() - t_table,
+            },
+        },
     )
-    write_hunspell_metadata(ROOT / "artifacts" / "hunspell_metadata.json", engine.metadata())
-    print(json.dumps({"train": len(train_rows), "valid": len(valid_rows), "elapsed_sec": elapsed}, indent=2))
+    write_hunspell_metadata(ROOT / "artifacts" / "hunspell_metadata.json", default_engine().metadata())
+    print(json.dumps({"train": n_train, "valid": n_valid, "elapsed_sec": elapsed}, indent=2))
     print(json.dumps(manifest["files"], indent=2))
     return 0
 

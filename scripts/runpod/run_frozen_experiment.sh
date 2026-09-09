@@ -63,10 +63,12 @@ PY
 
 # Fast gate only: DummyTokenizer / DummyBackbone, no HF download, no CUDA extract,
 # no long overfit. Real-encoder smoke is cache_frozen_features.py --smoke-examples.
-# pytest-timeout kills a stuck test; timeout(1) kills a stuck pytest process.
-log "unit tests (fast, not slow; 120s/test, 600s wall)"
+# pytest-timeout signal method mis-reports / hangs inside PyTorch native
+# code; use the thread method so a stuck test is still killed. timeout(1)
+# kills a stuck pytest process.
+log "unit tests (fast, not slow; 180s/test, 600s wall)"
 timeout 600 "${PYTHON:-python}" -m pytest tests/ -q -m "not slow" \
-  --timeout=120 --timeout-method=signal || die "unit tests"
+  --timeout=180 --timeout-method=thread || die "unit tests"
 
 log "building training data if needed (target ${TARGET_TRAIN} / ${TARGET_VALID})"
 if [ ! -f data/processed/train.parquet ] || [ ! -f data/processed/validation.parquet ]; then

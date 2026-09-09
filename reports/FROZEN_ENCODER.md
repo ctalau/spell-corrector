@@ -37,7 +37,7 @@ Equivalent: `--config configs/train_frozen_modernbert.yaml` alone sets
 runs `scripts/runpod/run_frozen_experiment.sh`:
 
 1. Fail-fast CUDA check, install `transformers>=4.48,<5`, and assert `AutoModel` imports.
-2. Fast unit tests (`pytest tests/ -q -m "not slow" --timeout=120` under
+2. Fast unit tests (`pytest tests/ -q -m "not slow" --timeout=180 --timeout-method=thread` under
    `timeout 600`). Tests that download `answerdotai/ModernBERT-base`, run CUDA
    extract, or train the byte-level overfit set are `@pytest.mark.slow` and are
    skipped here so a hung HF download cannot burn GPU hours. Default coverage

@@ -92,11 +92,11 @@ def test_encoder_feature_scale_and_linear_stay_finite() -> None:
     scaler = ScalarScaler(encoder_scale=scale)
     head = SelectorHead("linear", dropout=0.0)
     opt = torch.optim.AdamW(head.parameters(), lr=3e-4)
+    features = assemble_selector_features(context, typo, candidates, scalars, scaler=scaler)
+    assert torch.isfinite(features).all()
     last_loss = None
     for _ in range(8):
         opt.zero_grad(set_to_none=True)
-        features = assemble_selector_features(context, typo, candidates, scalars, scaler=scaler)
-        assert torch.isfinite(features).all()
         logits = mask_invalid_logits(head(features), valid)
         assert torch.isfinite(logits).all()
         loss = F.cross_entropy(logits, gold)

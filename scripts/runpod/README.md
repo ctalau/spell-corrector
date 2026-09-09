@@ -4,13 +4,27 @@
 **always** finish with `terminate.py`.
 
 ```bash
-python scripts/runpod/launch.py                 # create pod, print ssh command
-# ... ssh in, clone the repo to /workspace/spell-corrector ...
-bash scripts/runpod/setup.sh                    # ~2 min bootstrap
-nohup bash scripts/runpod/run_experiment.sh > /workspace/run.log 2>&1 &
+python scripts/runpod/launch.py                 # byte-level reranker (default)
+python scripts/runpod/launch.py --experiment frozen --branch <this-branch>
 # ... pull artifacts back ...
 python scripts/runpod/terminate.py --all        # stop paying
 ```
+
+Self-driving pods clone the repo, run `scripts/runpod/setup.sh`, then either
+`run_experiment.sh` (byte model) or `run_frozen_experiment.sh` when
+`--experiment frozen` / `--config configs/train_frozen_modernbert.yaml` is set.
+
+Frozen encoder launch (A5000-first, 100 GB disk, 200k-subset cache + H1/H2/H3):
+
+```bash
+python scripts/runpod/launch.py \
+  --experiment frozen \
+  --branch cursor/frozen-modernbert-selector-31a7 \
+  --config configs/train_frozen_modernbert.yaml
+```
+
+Pinned encoder: `answerdotai/ModernBERT-base` @ `8949b909ec900327062f0ebf497f51aef5e6f0c8`.
+Details: [reports/FROZEN_ENCODER.md](../../reports/FROZEN_ENCODER.md).
 
 ## Where the setup time went
 

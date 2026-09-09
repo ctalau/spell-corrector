@@ -17,6 +17,11 @@ from typing import Sequence
 
 from spelling_reranker.byte_encoding import N_CANDIDATE_SLOTS, nfc
 
+#: Frozen-encoder track uses Hunspell's raw first ten suggestions. Slice the
+#: raw list to this width *before* dedup or length filtering so a discarded
+#: duplicate in ranks 0-9 cannot pull in raw rank 11.
+FROZEN_CANDIDATE_SLOTS = 10
+
 
 def build_pool(
     hunspell_suggestions: Sequence[str],
@@ -38,6 +43,20 @@ def build_pool(
         seen.add(normalized)
         pool.append(normalized)
     return pool
+
+
+def first_ten_pool(
+    hunspell_suggestions: Sequence[str],
+    *,
+    max_bytes: int | None = None,
+) -> list[str]:
+    """Top-10 policy: slice raw suggestions first, then filter.
+
+    ``build_pool(suggestions, limit=10)`` can backfill with raw ranks beyond 10
+    after deduplication or length filtering. This function must not.
+    """
+    sliced = list(hunspell_suggestions)[:FROZEN_CANDIDATE_SLOTS]
+    return build_pool(sliced, limit=FROZEN_CANDIDATE_SLOTS, max_bytes=max_bytes)
 
 
 def gold_index(candidates: Sequence[str | None], gold: str) -> int | None:

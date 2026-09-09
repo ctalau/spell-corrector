@@ -118,6 +118,7 @@ pip_install /tmp/pip-upgrade.log --upgrade pip || die "pip upgrade"
 # Everything except torch, which the image already provides.
 pip_install /tmp/pip-deps.log \
   numpy pandas pyarrow tqdm pyyaml safetensors matplotlib requests pytest \
+  "transformers>=4.48" tokenizers huggingface_hub accelerate \
   || die "pip deps"
 pip_install /tmp/pip-build.log "setuptools<60" wheel cython || die "pip build deps"
 pip_install /tmp/hunspell-pip.log --no-build-isolation --force-reinstall hunspell==0.5.5 \

@@ -69,20 +69,54 @@ def api(path: str, method: str = "GET", payload: dict | None = None) -> dict | l
 
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--name", default="spell-corrector-train")
+    parser.add_argument("--name", default=None)
     parser.add_argument("--image", default=DEFAULT_IMAGE)
-    parser.add_argument("--disk-gb", type=int, default=80)
+    parser.add_argument("--disk-gb", type=int, default=None)
     parser.add_argument("--gpu", action="append", default=None, help="GPU type id (repeatable)")
-    parser.add_argument("--max-price", type=float, default=0.80, help="USD/hr ceiling")
+    parser.add_argument("--max-price", type=float, default=None, help="USD/hr ceiling")
     parser.add_argument("--wait", type=int, default=600, help="seconds to wait for RUNNING")
     parser.add_argument("--repo-url", default="https://github.com/ctalau/spell-corrector")
     parser.add_argument("--branch", default="main")
     parser.add_argument("--commit", default=None, help="exact revision (default: branch head)")
-    parser.add_argument("--target-train", type=int, default=3_000_000)
-    parser.add_argument("--target-valid", type=int, default=60_000)
-    parser.add_argument("--config", default="configs/train_full.yaml")
+    parser.add_argument("--target-train", type=int, default=None)
+    parser.add_argument("--target-valid", type=int, default=None)
+    parser.add_argument("--experiment", choices=("byte", "frozen"), default="byte",
+                        help="byte-level reranker, or frozen ModernBERT selector")
+    parser.add_argument("--config", default=None)
     parser.add_argument("--idle", action="store_true", help="do not auto-run the experiment")
     args = parser.parse_args()
+
+    if args.config is None:
+        args.config = (
+            "configs/train_frozen_modernbert.yaml"
+            if args.experiment == "frozen"
+            else "configs/train_full.yaml"
+        )
+    elif "frozen" in Path(args.config).name:
+        args.experiment = "frozen"
+
+    frozen = args.experiment == "frozen"
+    if args.name is None:
+        args.name = "spell-corrector-frozen" if frozen else "spell-corrector-train"
+    if args.disk_gb is None:
+        args.disk_gb = 100 if frozen else 80
+    if args.max_price is None:
+        args.max_price = 0.40 if frozen else 0.80
+    if args.target_train is None:
+        args.target_train = 400_000 if frozen else 3_000_000
+    if args.target_valid is None:
+        args.target_valid = 40_000 if frozen else 60_000
+    gpu_preference = (
+        [
+            "NVIDIA RTX A5000",
+            "NVIDIA GeForce RTX 4090",
+            "NVIDIA GeForce RTX 3090",
+            "NVIDIA A40",
+            "NVIDIA L40S",
+        ]
+        if frozen
+        else GPU_PREFERENCE
+    )
 
     # Pin to an exact commit rather than the branch name. raw.githubusercontent
     # caches branch paths for minutes, so a freshly pushed fix is not
@@ -102,7 +136,7 @@ def main() -> int:
     raw_base = args.repo_url.replace("https://github.com/", "https://raw.githubusercontent.com/")
     bootstrap_url = f"{raw_base}/{commit}/scripts/runpod/bootstrap.sh"
 
-    gpus = args.gpu or GPU_PREFERENCE
+    gpus = args.gpu or gpu_preference
     payload = {
         "name": args.name,
         "imageName": args.image,
@@ -121,6 +155,7 @@ def main() -> int:
             "TARGET_TRAIN": str(args.target_train),
             "TARGET_VALID": str(args.target_valid),
             "CONFIG": args.config,
+            "EXPERIMENT": args.experiment,
         },
     }
     if not args.idle:
@@ -159,6 +194,7 @@ def main() -> int:
         payload["dockerStartCmd"] = []
         print(f"commit:    {commit}")
         print(f"bootstrap: {bootstrap_url}")
+        print(f"experiment:{args.experiment} config={args.config}")
     print(f"creating pod over {gpus} (<= ${args.max_price}/hr)...")
     pod = api("/pods", "POST", payload)
     pod_id = pod.get("id")

@@ -2,7 +2,9 @@
 
 Date: 2026-09-09. Status: implementation and execution plan; no new training performed.
 
-**This is the next experiment, superseding the expensive E1–E6 sweep in [the previous plan](EXPERIMENT3_75_PLAN.md).** Test a pretrained encoder with all its weights frozen, training only a custom selector. No LoRA, backbone finetuning, or pretraining in this experiment. The user has requested a modern small encoder, permitting subword inputs in this new track; keep the earlier byte model as a historical control.
+Pinned Hugging Face revision for this implementation (resolved 2026-09-09):
+`answerdotai/ModernBERT-base` @ `8949b909ec900327062f0ebf497f51aef5e6f0c8`.
+Launch: see [FROZEN_ENCODER.md](FROZEN_ENCODER.md).
 
 ## 1. Diagnosis before implementation
 

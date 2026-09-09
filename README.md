@@ -95,6 +95,7 @@ python -m pytest tests/ -q
 | Typo realism vs the public misspelling list | `tests/test_typo_gen.py` |
 | Shapes, param counts, pooling equivalence, loss | `tests/test_model.py` |
 | Tiny overfit | `tests/test_tiny_overfit.py` |
+| Frozen encoder selector | `tests/test_frozen_encoder.py` |
 
 `tests/test_dataset.py` fails the build if any training-construction file so
 much as mentions the locked benchmark.
@@ -127,6 +128,35 @@ On OOM, lower `microbatch` and raise `grad_accumulation` in
 `configs/train_full.yaml` so the effective batch stays 512.
 
 Checkpoints land in `artifacts/model/`.
+
+## Frozen ModernBERT selector
+
+Pilot from [reports/FROZEN_ENCODER_PLAN.md](reports/FROZEN_ENCODER_PLAN.md): freeze
+`answerdotai/ModernBERT-base` (Hugging Face revision
+`8949b909ec900327062f0ebf497f51aef5e6f0c8`, resolved 2026-09-09) and train only
+a small selector. Launch on Runpod with:
+
+```bash
+python scripts/runpod/launch.py \
+  --experiment frozen \
+  --branch cursor/frozen-modernbert-selector-31a7 \
+  --config configs/train_frozen_modernbert.yaml
+```
+
+Local GPU path (after synthetic parquet exists):
+
+```bash
+python scripts/cache_frozen_features.py --config configs/train_frozen_modernbert.yaml --smoke-examples 10000
+python scripts/cache_frozen_features.py --config configs/train_frozen_modernbert.yaml --bea-limit 1000
+python scripts/train_frozen_selector.py --config configs/train_frozen_modernbert.yaml --arm scalar
+python scripts/train_frozen_selector.py --config configs/train_frozen_modernbert.yaml --arm linear
+python scripts/train_frozen_selector.py --config configs/train_frozen_modernbert.yaml --arm mlp
+python scripts/evaluate_frozen_selector.py --config configs/train_frozen_modernbert.yaml --split d-pair --checkpoint artifacts/frozen/heads/mlp
+python scripts/evaluate_frozen_selector.py --config configs/train_frozen_modernbert.yaml --split bea --bea-limit 1000 --checkpoint artifacts/frozen/heads/mlp
+```
+
+Do not train or tune on BEA-60K. The 1k subset is a monitoring gate only.
+See [reports/FROZEN_ENCODER.md](reports/FROZEN_ENCODER.md).
 
 ## Benchmark BEA-60K
 

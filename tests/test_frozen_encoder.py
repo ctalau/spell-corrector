@@ -123,10 +123,12 @@ def test_mlp_overfits_32_solvable_examples() -> None:
     valid[:, 8:] = 0
     head = SelectorHead("mlp", dropout=0.0)
     opt = torch.optim.AdamW(head.parameters(), lr=8e-3)
+    # Features are constant; assembling inside the loop 60x fights
+    # pytest-timeout --timeout-method=signal against PyTorch native ops.
+    features = assemble_selector_features(context, typo, candidates, scalars)
     last = None
     for _ in range(60):
         opt.zero_grad(set_to_none=True)
-        features = assemble_selector_features(context, typo, candidates, scalars)
         logits = mask_invalid_logits(head(features), valid)
         loss = F.cross_entropy(logits, gold)
         loss.backward()
@@ -589,8 +591,9 @@ def test_frozen_pins_transformers_4x_and_cu124_py311_image():
     assert f'"{pin}"' in frozen_sh
     assert "cannot import torch/AutoModel" in frozen_sh
     assert '-m "not slow"' in frozen_sh
-    assert "--timeout=120" in frozen_sh
-    assert "--timeout-method=signal" in frozen_sh
+    assert "--timeout=180" in frozen_sh
+    assert "--timeout-method=thread" in frozen_sh
+    assert "--timeout-method=signal" not in frozen_sh
     assert "timeout 600" in frozen_sh
     assert "pytest-timeout" in frozen_sh
     assert "pytest-timeout" in setup

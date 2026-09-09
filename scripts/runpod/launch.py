@@ -131,7 +131,9 @@ def main() -> int:
             "echo \"entrypoint: fetch attempt $i failed\" >> /workspace/out/run.log; "
             "sleep 10; done; "
             "if [ -s /workspace/out/bootstrap.sh ]; then "
-            "bash /workspace/out/bootstrap.sh; "
+            # -x, and stderr captured separately: a bootstrap that dies before
+            # its own logging is set up would otherwise leave no trace at all.
+            "bash -x /workspace/out/bootstrap.sh 2>>/workspace/out/boot.err; "
             "echo \"entrypoint: bootstrap exited rc=$?\" >> /workspace/out/run.log; "
             "else echo 'entrypoint: could not fetch bootstrap' >> /workspace/out/run.log; fi; "
             "sleep infinity"

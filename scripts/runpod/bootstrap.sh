@@ -16,7 +16,11 @@
 #
 # Configured by environment variables set at pod creation:
 #   REPO_URL, REPO_BRANCH, TARGET_TRAIN, TARGET_VALID, CONFIG
-set -uo pipefail
+# Deliberately no `set -u`: this script sources the image's profile scripts,
+# and those routinely reference unset variables. Under `set -u` that aborts the
+# shell before the first status write, which looks identical to "the container
+# did nothing".
+set -o pipefail
 
 OUT=/workspace/out
 mkdir -p "$OUT"
@@ -29,8 +33,9 @@ done
 # The image's own environment, if it has one, wins for the actual work.
 for profile in /etc/profile.d/*.sh /root/.bashrc; do
     # shellcheck disable=SC1090
-    [ -r "$profile" ] && . "$profile" 2>/dev/null
+    [ -r "$profile" ] && . "$profile" >/dev/null 2>&1
 done
+true  # sourcing failures must not decide this script's exit status
 
 PYTHON="$(command -v python3 || command -v python || echo /usr/bin/python3)"
 

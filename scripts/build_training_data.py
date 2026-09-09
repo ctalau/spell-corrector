@@ -52,8 +52,9 @@ def main() -> int:
         "config": "wikitext-103-raw-v1",
         "identifier": "Salesforce/wikitext wikitext-103-raw-v1",
         "license": "CC BY-SA",
-        "train_file": str(train_raw),
-        "valid_file": str(valid_raw),
+        "train_file": "data/raw/wikitext-103-raw/wiki.train.raw",
+        "valid_file": "data/raw/wikitext-103-raw/wiki.valid.raw",
+        "download": "scripts/download_sources.py",
         "split_policy": "official WikiText train/valid article files",
     }
 

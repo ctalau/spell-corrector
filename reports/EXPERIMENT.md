@@ -21,8 +21,11 @@ See `data/processed/data_stats.json` and `manifest.json` after
 
 | Split | Target | Actual |
 |-------|--------|--------|
-| Train | 240,000 (min 150,000) | _pending data build_ |
-| Valid | 20,000 (min 10,000) | _pending data build_ |
+| Train | 240,000 (min 150,000) | 235,626 |
+| Valid | 20,000 (min 10,000) | 19,642 |
+
+Hashes: `data/processed/manifest.json`. Build wall time on a 4-core CPU: ~1065 s.
+Section-heading boilerplate was dropped so train/valid sentence hashes do not overlap.
 
 Authentic typo corpora omitted (redistribution).
 

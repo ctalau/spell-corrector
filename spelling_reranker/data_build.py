@@ -114,9 +114,14 @@ def paragraphs_from_article(text: str) -> list[str]:
     return out
 
 
+def is_section_heading(sentence: str) -> bool:
+    text = sentence.strip()
+    return text.startswith("=") and text.endswith("=")
+
+
 def sentences_from_paragraph(paragraph: str) -> list[str]:
     parts = SENT_SPLIT_RE.split(paragraph)
-    return [p.strip() for p in parts if p.strip()]
+    return [p.strip() for p in parts if p.strip() and not is_section_heading(p.strip())]
 
 
 def _candidate_too_long(candidates: list[str]) -> bool:
@@ -443,13 +448,13 @@ def write_processed(
         "seed": seed,
         "files": {
             "train": {
-                "path": str(train_path.as_posix()),
+                "path": "data/processed/train.parquet",
                 "n": len(train_rows),
                 "sha256": _file_hash(train_path),
                 "bytes": train_path.stat().st_size,
             },
             "validation": {
-                "path": str(valid_path.as_posix()),
+                "path": "data/processed/validation.parquet",
                 "n": len(valid_rows),
                 "sha256": _file_hash(valid_path),
                 "bytes": valid_path.stat().st_size,

@@ -1,0 +1,32 @@
+{
+  "seed": 1337,
+  "files": {
+    "train": {
+      "path": "data/processed/train.parquet",
+      "n": 235626,
+      "sha256": "1f609447255599343633abf5794a2b31725588aedd74f98ef6f8e4263997914d",
+      "bytes": 26527114
+    },
+    "validation": {
+      "path": "data/processed/validation.parquet",
+      "n": 19642,
+      "sha256": "f8aa13c56498f54026ba8deed3a02dfea1439cd1834a3b86ba1eb8d1e8c3bdd1",
+      "bytes": 2406202
+    }
+  },
+  "source": {
+    "dataset": "WikiText-103 raw",
+    "config": "wikitext-103-raw-v1",
+    "identifier": "Salesforce/wikitext wikitext-103-raw-v1",
+    "license": "CC BY-SA",
+    "train_file": "data/raw/wikitext-103-raw/wiki.train.raw",
+    "valid_file": "data/raw/wikitext-103-raw/wiki.valid.raw",
+    "download": "scripts/download_sources.py",
+    "split_policy": "official WikiText train/valid article files; section headings dropped; no shared sentence hashes"
+  },
+  "notes": [
+    "Synthetic typos derived from WikiText-103 raw only.",
+    "Authentic typo corpora were omitted due to redistribution uncertainty.",
+    "Held-out benchmark data is never used here."
+  ]
+}

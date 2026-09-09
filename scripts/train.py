@@ -14,6 +14,7 @@ import time
 from collections import Counter
 from pathlib import Path
 
+import matplotlib.pyplot as plt
 import torch
 from torch.utils.data import DataLoader
 from tqdm import tqdm
@@ -91,6 +92,31 @@ def evaluate(model: ByteSpellingReranker, loader: DataLoader, device: torch.devi
         "n": n,
         "acc_by_gold_index": acc_by_gold,
     }
+
+
+def _plot_training_loss(metrics_path: Path, out_path: Path) -> None:
+    if not metrics_path.is_file():
+        return
+    steps: list[int] = []
+    losses: list[float] = []
+    for line in metrics_path.read_text(encoding="utf-8").splitlines():
+        if not line.strip():
+            continue
+        rec = json.loads(line)
+        if rec.get("phase") == "train" and "loss" in rec:
+            steps.append(int(rec["step"]))
+            losses.append(float(rec["loss"]))
+    if not steps:
+        return
+    out_path.parent.mkdir(parents=True, exist_ok=True)
+    fig, ax = plt.subplots(figsize=(8, 4))
+    ax.plot(steps, losses)
+    ax.set_xlabel("optimizer step")
+    ax.set_ylabel("train loss")
+    ax.set_title("Training loss")
+    fig.tight_layout()
+    fig.savefig(out_path, dpi=120)
+    plt.close(fig)
 
 
 def _save_checkpoint(model: ByteSpellingReranker, path: Path) -> None:
@@ -343,6 +369,7 @@ def main() -> int:
         json.dumps(training_manifest, indent=2) + "\n", encoding="utf-8"
     )
     summary_path.write_text(json.dumps(training_manifest, indent=2) + "\n", encoding="utf-8")
+    _plot_training_loss(metrics_path, ROOT / "reports" / "training_loss.png")
     print(json.dumps(training_manifest, indent=2))
     return 0
 

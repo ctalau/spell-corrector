@@ -9,6 +9,7 @@ import sys
 import zipfile
 from pathlib import Path
 
+import pyarrow.parquet as pq
 import requests
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -67,8 +68,6 @@ def extract_zip(zip_path: Path, out_dir: Path) -> Path:
 
 
 def reconstruct_from_parquet(out_dir: Path) -> Path:
-    import pyarrow.parquet as pq
-
     raw_dir = out_dir / "wikitext-103-raw"
     raw_dir.mkdir(parents=True, exist_ok=True)
     for dest_name, parts in PARQUET_FILES.items():

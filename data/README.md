@@ -33,7 +33,26 @@ python scripts/download_sources.py
 python scripts/build_training_data.py --seed 1337
 ```
 
-Raw WikiText (`data/raw/`) is gitignored; download it with the script.
+The original Salesforce S3 zip is gone. `download_sources.py` fetches the
+191,984,949-byte `wikitext-103-raw-v1.zip` from the HuggingFace mirror
+`mattdangerw/wikitext-103-raw` (same archive size as the historical release)
+and falls back to official `Salesforce/wikitext` parquet.
+
+Raw WikiText (`data/raw/`) is gitignored.
+
+### Committed processed split (seed 1337)
+
+| Split | Examples | SHA-256 | Size |
+|-------|----------|---------|------|
+| train | 235,626 | `1f609447255599343633abf5794a2b31725588aedd74f98ef6f8e4263997914d` | 26,527,114 |
+| validation | 19,642 | `f8aa13c56498f54026ba8deed3a02dfea1439cd1834a3b86ba1eb8d1e8c3bdd1` | 2,406,202 |
+
+Built at 240k/20k then filtered: WikiText `= = heading = =` lines (shared
+boilerplate across articles) were dropped so train/valid sentence-hash
+overlap is zero. Counts remain above the 150k/10k minimum.
+
+Gold Hunspell index 0 is common (~68%), which is expected; the long tail
+(indices 1–9) is the reranking signal. See `data/processed/data_stats.json`.
 
 ## Authentic typo corpora (omitted)
 

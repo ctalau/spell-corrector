@@ -188,5 +188,100 @@
         "max_ms": 918.8306519999969
       }
     }
+  },
+  "minicpm5-1b": {
+    "model_id": "openbmb/MiniCPM5-1B",
+    "model_name": "minicpm5-1b",
+    "seed": 1337,
+    "n_samples": 100,
+    "time_budget_seconds": 300.0,
+    "max_candidates": 8,
+    "max_new_tokens": 8,
+    "dtype": "auto",
+    "bea_n_word_errors": 68429,
+    "bea_n_hunspell_flagged": 67877,
+    "bea_n_eligible": 67844,
+    "hunspell_metadata": {
+      "hunspell_cli_version": "@(#) International Ispell Version 3.2.06 (but really Hunspell 1.7.2)",
+      "python_binding": "/usr/local/lib/python3.11/dist-packages/hunspell.cpython-311-x86_64-linux-gnu.so",
+      "dictionary_package": "hunspell-en-us",
+      "dictionary_paths": {
+        "dic": "/usr/share/hunspell/en_US.dic",
+        "aff": "/usr/share/hunspell/en_US.aff"
+      },
+      "dictionary_hashes": {
+        "en_US.dic": {
+          "path": "/usr/share/hunspell/en_US.dic",
+          "sha256": "829a043cf078d1e80e886289a13823454977f442a239a859d2133ea61944aa60",
+          "size": 860381
+        },
+        "en_US.aff": {
+          "path": "/usr/share/hunspell/en_US.aff",
+          "sha256": "70fe5778717d097ce2f3326baaa5c1e4d2206d81a5a81d3ea8e11c4770806dd5",
+          "size": 3131
+        }
+      },
+      "os": {
+        "system": "Linux",
+        "release": "6.18.44-fc-v24",
+        "platform": "Linux-6.18.44-fc-v24-x86_64-with-glibc2.39",
+        "python": "3.11.15"
+      }
+    },
+    "python": "3.11.15",
+    "load_seconds": 58.21070346600004,
+    "load_class": "AutoModelForCausalLM",
+    "device": "cpu",
+    "torch_version": "2.14.0+cpu",
+    "transformers_version": "5.17.0",
+    "supports_system_role": true,
+    "supports_enable_thinking": true,
+    "warmup_latency_s": 4.838028077999979,
+    "sample_100": {
+      "n_requested": 100,
+      "n_ok": 100,
+      "n_errors_raised": 0,
+      "n_no_answer": 0,
+      "elapsed_seconds": 223.26634967400014,
+      "throughput_qps": 0.44789552991757997,
+      "overall_accuracy": 0.39,
+      "conditional_accuracy": 0.46987951807228917,
+      "n_gold_in_pool": 83,
+      "hunspell_top1_accuracy_on_sample": 0.59,
+      "latency_stats": {
+        "n": 100,
+        "mean_ms": 2230.825629320002,
+        "stdev_ms": 205.51076867863483,
+        "min_ms": 1851.5195139998468,
+        "p50_ms": 2182.740964000004,
+        "p90_ms": 2495.569375199989,
+        "p95_ms": 2549.3717445499897,
+        "p99_ms": 2771.6694879499996,
+        "max_ms": 3071.795209999891
+      }
+    },
+    "timed_5min": {
+      "n_requested": 139,
+      "n_ok": 139,
+      "n_errors_raised": 0,
+      "n_no_answer": 0,
+      "elapsed_seconds": 301.9727457079998,
+      "throughput_qps": 0.4603064414773695,
+      "overall_accuracy": 0.37410071942446044,
+      "conditional_accuracy": 0.45614035087719296,
+      "n_gold_in_pool": 114,
+      "hunspell_top1_accuracy_on_sample": 0.5683453237410072,
+      "latency_stats": {
+        "n": 139,
+        "mean_ms": 2171.0414120863343,
+        "stdev_ms": 197.88318941349337,
+        "min_ms": 1831.614497999908,
+        "p50_ms": 2146.406710999827,
+        "p90_ms": 2423.3708262000164,
+        "p95_ms": 2523.3930630999794,
+        "p99_ms": 2787.362821120128,
+        "max_ms": 2883.3135749998746
+      }
+    }
   }
 }

@@ -1,0 +1,29 @@
+== training ==
+  parameters          87,352,577
+  train / valid       2,081,171 / 20,773
+  optimizer steps     8130
+  duration            3.11 h
+  gpu                 NVIDIA L40S
+  best val loss       0.2072
+  best val top-1      92.42%
+  val top-1 @slot0    97.95%
+  val top-1 @slot>0   82.61%
+
+== BEA-60K ==
+  word errors         68,429
+  Hunspell top-1      53.67%
+  Hunspell oracle@10  80.34%
+  Hunspell oracle@16  80.89%  <- ceiling
+  Aspell top-1        60.56%
+  model conditional   80.14%
+  model overall       64.82%
+
+== target ==
+  target              75.00%
+  achieved            64.82%   NOT MET
+  conditional needed  92.72% (had 80.14%)
+  vs Aspell           +4.26 pp
+
+== where the remaining error sits ==
+  gold outside pool   19.11%  (unreachable: Hunspell never offers it)
+  model picked wrong  16.07%  (reachable: better reranking)

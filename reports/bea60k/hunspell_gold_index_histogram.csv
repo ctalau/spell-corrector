@@ -9,7 +9,13 @@ bin,count,percent
 7,293,0.4282
 8,296,0.4326
 9,149,0.2177
+10,139,0.2031
+11,62,0.0906
+12,50,0.0731
+13,85,0.1242
+14,37,0.0541
+15,0,0.0000
 present_later,0,0.0000
-not_present,12865,18.8005
+not_present,12492,18.2554
 hunspell_did_not_flag,552,0.8067
 hunspell_no_suggestions,33,0.0482

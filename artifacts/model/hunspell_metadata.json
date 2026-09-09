@@ -1,6 +1,6 @@
 {
-  "hunspell_cli_version": "@(#) International Ispell Version 3.2.06 (but really Hunspell 1.7.2)",
-  "python_binding": "/workspace/spell-corrector/.venv/lib/python3.12/site-packages/hunspell.cpython-312-x86_64-linux-gnu.so",
+  "hunspell_cli_version": "@(#) International Ispell Version 3.2.06 (but really Hunspell 1.7.0)",
+  "python_binding": "/workspace/venv/lib/python3.11/site-packages/hunspell.cpython-311-x86_64-linux-gnu.so",
   "dictionary_package": "hunspell-en-us",
   "dictionary_paths": {
     "dic": "/usr/share/hunspell/en_US.dic",
@@ -20,8 +20,8 @@
   },
   "os": {
     "system": "Linux",
-    "release": "6.8.0-57-generic",
-    "platform": "Linux-6.8.0-57-generic-x86_64-with-glibc2.39",
-    "python": "3.12.3"
+    "release": "6.8.0-52-generic",
+    "platform": "Linux-6.8.0-52-generic-x86_64-with-glibc2.35",
+    "python": "3.11.15"
   }
 }

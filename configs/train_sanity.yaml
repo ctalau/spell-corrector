@@ -36,7 +36,9 @@ training:
   max_steps: 100
 
 output:
-  dir: artifacts
-  metrics_jsonl: artifacts/train_metrics.jsonl
-  summary_json: artifacts/train_summary.json
-  model_dir: artifacts/model
+  # Separate from the full run so a sanity pass never leaves a 28M checkpoint
+  # sitting where the real model is expected.
+  dir: artifacts/sanity
+  metrics_jsonl: artifacts/sanity/train_metrics.jsonl
+  summary_json: artifacts/sanity/train_summary.json
+  model_dir: artifacts/sanity/model

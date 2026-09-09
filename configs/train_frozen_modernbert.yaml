@@ -31,6 +31,8 @@ cache:
 training:
   optimizer: adamw
   learning_rate: 1.0e-3
+  # Linear (H2) on 3854-d encoder features; 1e-3 exploded after one step (NaN).
+  learning_rate_linear: 3.0e-4
   weight_decay: 0.01
   betas: [0.9, 0.999]
   eps: 1.0e-8
@@ -43,6 +45,7 @@ training:
   log_every: 5
   checkpoint_every_steps: 50
   checkpoint_every_seconds: 1800
+  bea_every_steps: 200
   bea_gate_delta: 0.01
   bea_limit: 1000
   # One predeclared H3 retry if the 1e-3 run is unstable.

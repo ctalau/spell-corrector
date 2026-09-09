@@ -2,8 +2,9 @@
 # Frozen ModernBERT encoder + selector-head experiment.
 #
 # Smoke-cache 10k, full 200k + D-pair cache, train H1 then H2 then H3.
-# Periodic 30-minute checkpoints evaluate a fixed BEA-60K 1k subset; an arm
+# BEA-1k gate: every 30 minutes, every N steps, and once per epoch. An arm
 # stops when overall and conditional accuracy both fail to improve by >1 pp.
+# H2 linear NaN/non-zero is recorded and H3 still runs; only H1 scalar aborts.
 # Does not run the full BEA benchmark. Serve artifacts over HTTP via bootstrap.
 set -uo pipefail
 
@@ -91,15 +92,26 @@ log "full 200k + D-pair cache + BEA-1k features"
 
 train_arm() {
   local arm="$1"
+  local rc
   log "train H ${arm}"
-  if "${PYTHON:-python}" scripts/train_frozen_selector.py --config "$CONFIG" --arm "$arm"; then
+  # Capture rc immediately. `if cmd; then return; fi; rc=$?` is often 0 because
+  # the if-compound succeeded even when cmd failed.
+  "${PYTHON:-python}" scripts/train_frozen_selector.py --config "$CONFIG" --arm "$arm"
+  rc=$?
+  if [ "$rc" -eq 0 ]; then
     return 0
   fi
-  local rc=$?
   if [ "$arm" = "mlp" ] && [ "$rc" -eq 2 ]; then
     echo "H3 unstable (non-finite loss); one predeclared retry at 3e-4"
     "${PYTHON:-python}" scripts/train_frozen_selector.py --config "$CONFIG" --arm mlp --lr 3e-4 \
       || die "H3 retry"
+    return 0
+  fi
+  if [ "$arm" = "linear" ]; then
+    echo "H2 linear failed (rc=${rc}); recording failure and continuing to H3 mlp"
+    mkdir -p artifacts/frozen/heads/linear
+    printf '%s\n' "{\"arm\":\"linear\",\"failed\":true,\"rc\":${rc}}" \
+      > artifacts/frozen/heads/linear/failure.json
     return 0
   fi
   die "train ${arm} rc=${rc}"

@@ -534,6 +534,37 @@ def test_dummy_cache_and_head_train_smoke(tmp_path) -> None:
     )
     assert proc2.returncode == 0, proc2.stdout + proc2.stderr
     assert (tmp_path / "head" / "head.safetensors").is_file()
+    linear_out = tmp_path / "head-linear"
+    proc_linear = subprocess.run(
+        [
+            sys.executable,
+            str(train_script),
+            "--config",
+            str(cfg),
+            "--arm",
+            "linear",
+            "--allow-cpu",
+            "--device",
+            "cpu",
+            "--no-bea-gate",
+            "--max-steps",
+            "3",
+            "--cache-dir",
+            str(cache_dir),
+            "--output-dir",
+            str(linear_out),
+        ],
+        check=False,
+        capture_output=True,
+        text=True,
+    )
+    assert proc_linear.returncode in (0, 2), proc_linear.stdout + proc_linear.stderr
+    summary_text = (linear_out / "summary.json").read_text(encoding="utf-8")
+    assert "NaN" not in summary_text
+    summary = json.loads(summary_text)
+    assert summary["arm"] == "linear"
+    if proc_linear.returncode == 2:
+        assert summary["nan_seen"] is True
     # Policy change invalidates the cache key.
     other = cache_key(
         encoder_id="dummy",
@@ -563,6 +594,10 @@ def test_frozen_pins_transformers_4x_and_cu124_py311_image():
     assert "timeout 600" in frozen_sh
     assert "pytest-timeout" in frozen_sh
     assert "pytest-timeout" in setup
+    assert "local rc" in frozen_sh
+    assert "rc=$?" in frozen_sh
+    assert 'if "${PYTHON:-python}" scripts/train_frozen_selector.py --config "$CONFIG" --arm "$arm"; then' not in frozen_sh
+    assert "continuing to H3 mlp" in frozen_sh
     launch = (ROOT / "scripts/runpod/launch.py").read_text()
     assert 'FROZEN_IMAGE = "runpod/pytorch:2.4.0-py3.11-cuda12.4.1-devel-ubuntu22.04"' in launch
 

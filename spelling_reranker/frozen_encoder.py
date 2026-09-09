@@ -72,10 +72,11 @@ class FrozenSerializedExample:
 
 @dataclass
 class ScalarScaler:
-    """Train-only numeric scaling for the two continuous spelling features."""
+    """Train-only numeric scaling for spelling length-delta and encoder RMS."""
 
     length_mean: float = 0.0
     length_std: float = 1.0
+    encoder_scale: float = 1.0
 
     def to_dict(self) -> dict[str, float]:
         return asdict(self)
@@ -87,6 +88,7 @@ class ScalarScaler:
         return cls(
             length_mean=float(data.get("length_mean", 0.0)),
             length_std=float(data.get("length_std", 1.0) or 1.0),
+            encoder_scale=float(data.get("encoder_scale", 1.0) or 1.0),
         )
 
     def apply_numpy(self, scalars: np.ndarray) -> np.ndarray:
@@ -412,6 +414,13 @@ def assemble_selector_features(
     rank = rank.unsqueeze(0).expand(batch, n_cand, n_cand)
     if not include_encoder:
         return torch.cat([rank, scaled], dim=-1)
+    enc_scale = 1.0
+    if scaler is not None:
+        enc_scale = scaler.encoder_scale if scaler.encoder_scale > 1e-6 else 1.0
+    if enc_scale != 1.0:
+        context = context / enc_scale
+        typo = typo / enc_scale
+        candidates = candidates / enc_scale
     typo_exp = typo.unsqueeze(1).expand_as(candidates)
     ctx_exp = context.unsqueeze(1).expand_as(candidates)
     return torch.cat(
@@ -612,19 +621,23 @@ class SelectorHead(nn.Module):
         self.scalar_dim = self.n_candidates + N_SPELLING_FEATURES
         if arm == "scalar":
             self.in_dim = self.scalar_dim
+            self.input_norm = nn.Identity()
             self.net = _mlp(self.in_dim, dropout)
         elif arm == "linear":
             self.in_dim = self.encoder_dim
+            # Unnormalized 3854-d encoder features + lr 1e-3 NaN'd after one step.
+            self.input_norm = nn.LayerNorm(self.in_dim)
             self.net = nn.Linear(self.in_dim, 1)
         else:
             self.in_dim = self.encoder_dim
+            self.input_norm = nn.Identity()
             self.net = _mlp(self.in_dim, dropout)
 
     def uses_encoder_features(self) -> bool:
         return self.arm != "scalar"
 
     def forward(self, features: torch.Tensor) -> torch.Tensor:
-        return self.net(features).squeeze(-1)
+        return self.net(self.input_norm(features)).squeeze(-1)
 
 
 class FrozenSelector(nn.Module):
@@ -803,6 +816,25 @@ def load_feature_shards(cache_dir: Path, split: str) -> dict[str, np.ndarray]:
     parts = [dict(np.load(path, allow_pickle=True)) for path in paths]
     keys = parts[0].keys()
     return {key: np.concatenate([part[key] for part in parts], axis=0) for key in keys}
+
+
+def encoder_feature_scale(
+    context: np.ndarray,
+    typo: np.ndarray,
+    candidates: np.ndarray,
+) -> float:
+    """Train-only RMS of pooled encoder activations so c*t / |c-t| stay O(1)."""
+    parts = [
+        np.asarray(context, dtype=np.float32).reshape(-1),
+        np.asarray(typo, dtype=np.float32).reshape(-1),
+        np.asarray(candidates, dtype=np.float32).reshape(-1),
+    ]
+    vals = np.concatenate(parts)
+    vals = vals[np.isfinite(vals)]
+    if vals.size == 0:
+        return 1.0
+    rms = float(np.sqrt(np.mean(np.square(vals.astype(np.float64)))))
+    return rms if rms > 1e-6 else 1.0
 
 
 def fit_scalar_scaler(scalars: np.ndarray, valid: np.ndarray) -> ScalarScaler:

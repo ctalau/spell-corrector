@@ -1,15 +1,15 @@
 {
   "n": 68429,
-  "aspell_top1": 0.6055327419661255,
-  "no_suggestion": 547,
-  "correct": 41436,
+  "aspell_top1": 0.6056496514635608,
+  "no_suggestion": 546,
+  "correct": 41444,
   "metadata": {
-    "aspell_version": "@(#) International Ispell Version 3.1.20 (but really Aspell 0.60.8.1)",
+    "aspell_version": "@(#) International Ispell Version 3.1.20 (but really Aspell 0.60.8)",
     "lang": "en_US",
     "os": {
       "system": "Linux",
-      "release": "6.8.0-57-generic",
-      "platform": "Linux-6.8.0-57-generic-x86_64-with-glibc2.39"
+      "release": "6.8.0-52-generic",
+      "platform": "Linux-6.8.0-52-generic-x86_64-with-glibc2.35"
     }
   }
 }

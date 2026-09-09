@@ -16,7 +16,14 @@
   "CAND_7": 270,
   "CAND_8": 271,
   "CAND_9": 272,
-  "CAND_END": 273,
+  "CAND_10": 273,
+  "CAND_11": 274,
+  "CAND_12": 275,
+  "CAND_13": 276,
+  "CAND_14": 277,
+  "CAND_15": 278,
+  "CAND_END": 279,
+  "MASK": 280,
   "BYTE_VOCAB": 256,
-  "VOCAB_SIZE": 274
+  "VOCAB_SIZE": 281
 }

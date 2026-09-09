@@ -2,10 +2,11 @@
 """Train a frozen-encoder selector head (H1 scalar / H2 linear / H3 MLP).
 
 Head-only AdamW. Early-stop on D-pair conditional accuracy (patience 2).
-Checkpoints every N steps and on a wall-clock interval. The 30-minute BEA-1k
-user gate stops an arm when overall and conditional accuracy both fail to
-improve by more than 1 percentage point versus the best prior 30-minute
-checkpoint.
+Checkpoints every N steps and on a wall-clock interval. The BEA-1k user gate
+runs on the 30-minute wall clock, every N steps (default 200), and once per
+epoch. It stops an arm when overall and conditional accuracy both fail to
+improve by more than 1 percentage point versus the best prior BEA-1k
+checkpoint. Non-finite train steps set nan_seen and return exit code 2.
 """
 
 from __future__ import annotations
@@ -38,6 +39,7 @@ from spelling_reranker.frozen_encoder import (
     ScalarScaler,
     SelectorHead,
     assemble_selector_features,
+    encoder_feature_scale,
     fit_scalar_scaler,
     load_feature_shards,
     mask_invalid_logits,
@@ -46,6 +48,57 @@ from spelling_reranker.model import count_parameters, topk_accuracy
 from spelling_reranker.seed import DEFAULT_SEED, seed_everything
 
 from evaluate_frozen_selector import evaluate_bea_limit, score_bundle
+
+
+def json_safe(obj: object) -> object:
+    """Replace non-finite floats with None so summary.json is valid JSON."""
+    if isinstance(obj, float):
+        return obj if math.isfinite(obj) else None
+    if isinstance(obj, np.floating):
+        value = float(obj)
+        return value if math.isfinite(value) else None
+    if isinstance(obj, np.integer):
+        return int(obj)
+    if isinstance(obj, dict):
+        return {str(key): json_safe(value) for key, value in obj.items()}
+    if isinstance(obj, (list, tuple)):
+        return [json_safe(value) for value in obj]
+    return obj
+
+
+def dumps_json(obj: object, *, indent: int | None = None) -> str:
+    return json.dumps(json_safe(obj), indent=indent, allow_nan=False)
+
+
+def default_learning_rate(arm: str, train_cfg: dict, override: float | None) -> float:
+    if override is not None:
+        return float(override)
+    if arm == "linear":
+        return float(train_cfg.get("learning_rate_linear", 3e-4))
+    return float(train_cfg.get("learning_rate", 1e-3))
+
+
+def bea_gate_due(
+    *,
+    use_gate: bool,
+    now: float,
+    last_wall: float,
+    wall_seconds: float,
+    step: int,
+    last_step: int,
+    every_steps: int,
+    force: bool = False,
+) -> bool:
+    """True when the BEA-1k gate should run (wall, every N steps, or per epoch)."""
+    if not use_gate or step == last_step:
+        return False
+    if force:
+        return True
+    if wall_seconds > 0 and (now - last_wall) >= wall_seconds:
+        return True
+    if every_steps > 0 and step > 0 and step % every_steps == 0:
+        return True
+    return False
 
 
 class SolvableFeatureDataset(Dataset):
@@ -156,15 +209,20 @@ def eval_loader(head: SelectorHead, loader: DataLoader, device: torch.device, sc
             scaler=scaler,
         )
         logits = mask_invalid_logits(head(features), batch["valid"])
+        if not torch.isfinite(logits).all():
+            continue
         loss = F.cross_entropy(logits, batch["gold_index"])
+        loss_v = float(loss.item())
+        if not math.isfinite(loss_v):
+            continue
         bsz = int(batch["gold_index"].size(0))
-        total_loss += float(loss.item()) * bsz
+        total_loss += loss_v * bsz
         total_top1 += float(topk_accuracy(logits, batch["gold_index"], k=1, candidate_valid=batch["valid"]).item()) * bsz
         total_top3 += float(topk_accuracy(logits, batch["gold_index"], k=3, candidate_valid=batch["valid"]).item()) * bsz
         n += bsz
     head.train()
     return {
-        "loss": total_loss / max(1, n),
+        "loss": total_loss / n if n else None,
         "conditional_accuracy": total_top1 / max(1, n),
         "conditional_top3": total_top3 / max(1, n),
         "n": n,
@@ -201,6 +259,7 @@ def main() -> int:
     train_bundle = load_feature_shards(cache_dir, "train")
     valid_bundle = load_feature_shards(cache_dir, "dpair")
     scaler = fit_scalar_scaler(train_bundle["scalars"], train_bundle["valid"])
+    scaler.encoder_scale = encoder_feature_scale(train_bundle["x"], train_bundle["t"], train_bundle["c"])
     train_ds = SolvableFeatureDataset(train_bundle)
     valid_ds = SolvableFeatureDataset(valid_bundle)
     batch_size = int(train_cfg.get("batch_size", 512))
@@ -215,12 +274,16 @@ def main() -> int:
         dropout=float(train_cfg.get("dropout", 0.1)),
     ).to(device)
     n_params = count_parameters(head)
-    print(f"arm={args.arm} trainable={n_params:,} train_solvable={len(train_ds)} dpair_solvable={len(valid_ds)}")
+    lr = default_learning_rate(args.arm, train_cfg, args.lr)
+    print(
+        f"arm={args.arm} lr={lr} trainable={n_params:,} "
+        f"train_solvable={len(train_ds)} dpair_solvable={len(valid_ds)}"
+    )
     if n_params <= 0:
         raise SystemExit("selector head has no trainable parameters")
     optimizer = torch.optim.AdamW(
         head.parameters(),
-        lr=float(args.lr if args.lr is not None else train_cfg.get("learning_rate", 1e-3)),
+        lr=lr,
         betas=tuple(train_cfg.get("betas", (0.9, 0.999))),
         eps=float(train_cfg.get("eps", 1e-8)),
         weight_decay=float(train_cfg.get("weight_decay", 0.01)),
@@ -236,6 +299,7 @@ def main() -> int:
         "n_candidates": FROZEN_CANDIDATE_SLOTS,
         "scaler": scaler.to_dict(),
         "trainable_parameters": n_params,
+        "learning_rate": lr,
         "seed": seed,
     }
     (out_dir / "meta.json").write_text(json.dumps(meta, indent=2) + "\n", encoding="utf-8")
@@ -248,6 +312,7 @@ def main() -> int:
     max_grad = float(train_cfg.get("max_grad_norm", 1.0))
     ckpt_steps = int(train_cfg.get("checkpoint_every_steps", 50))
     ckpt_seconds = float(train_cfg.get("checkpoint_every_seconds", 1800))
+    bea_every_steps = int(train_cfg.get("bea_every_steps", 200))
     bea_delta = float(train_cfg.get("bea_gate_delta", 0.01))
     bea_limit = int(args.bea_limit if args.bea_limit is not None else train_cfg.get("bea_limit", 1000))
     use_bea_gate = not args.no_bea_gate
@@ -260,10 +325,66 @@ def main() -> int:
     nan_seen = False
     stop_reason = None
     last_bea_wall = time.time()
+    last_bea_step = -1
     best_bea_overall = None
     best_bea_cond = None
     bea_gate_fired = False
     started = time.time()
+
+    def run_bea_gate(*, force: bool = False) -> bool:
+        nonlocal last_bea_wall, last_bea_step, best_bea_overall, best_bea_cond
+        nonlocal stop_reason, bea_gate_fired
+        if not bea_gate_due(
+            use_gate=use_bea_gate,
+            now=time.time(),
+            last_wall=last_bea_wall,
+            wall_seconds=ckpt_seconds,
+            step=global_step,
+            last_step=last_bea_step,
+            every_steps=bea_every_steps,
+            force=force,
+        ):
+            return False
+        _save_head(head, out_dir / f"wall_{global_step}.safetensors")
+        bea = evaluate_bea_limit(
+            head,
+            config=cfg,
+            bea_dir=args.bea_dir,
+            limit=bea_limit,
+            device=device,
+            scaler=scaler,
+            cache_dir=cache_dir,
+        )
+        last_bea_wall = time.time()
+        last_bea_step = global_step
+        rec = {"phase": "bea1k", "step": global_step, **{k: v for k, v in bea.items() if k != "ledger"}}
+        metrics_f.write(dumps_json(rec) + "\n")
+        metrics_f.flush()
+        overall = float(bea["overall_accuracy"])
+        cond = float(bea["conditional_accuracy"])
+        print(
+            f"BEA-{bea_limit} step={global_step} overall={overall:.4f} cond={cond:.4f}",
+            flush=True,
+        )
+        if best_bea_overall is None:
+            best_bea_overall, best_bea_cond = overall, cond
+            _save_head(head, out_dir / "best_bea.safetensors")
+            return False
+        d_over = overall - best_bea_overall
+        d_cond = cond - best_bea_cond
+        if overall > best_bea_overall:
+            best_bea_overall = overall
+            _save_head(head, out_dir / "best_bea.safetensors")
+        if cond > best_bea_cond:
+            best_bea_cond = cond
+        if d_over <= bea_delta and d_cond <= bea_delta:
+            stop_reason = (
+                f"bea-gate: overall {d_over:+.4f} cond {d_cond:+.4f} "
+                f"not greater than {bea_delta:.2f}"
+            )
+            bea_gate_fired = True
+            return True
+        return False
 
     metrics_f = metrics_path.open("w", encoding="utf-8")
     try:
@@ -283,13 +404,30 @@ def main() -> int:
                     include_encoder=head.uses_encoder_features(),
                     scaler=scaler,
                 )
-                logits = mask_invalid_logits(head(features), batch["valid"])
+                if not torch.isfinite(features).all():
+                    nan_seen = True
+                    print("non-finite features, skipping step", file=sys.stderr)
+                    continue
+                raw_logits = head(features)
+                if not torch.isfinite(raw_logits).all():
+                    nan_seen = True
+                    print("non-finite logits, skipping step", file=sys.stderr)
+                    continue
+                logits = mask_invalid_logits(raw_logits, batch["valid"])
                 loss = F.cross_entropy(logits, batch["gold_index"])
                 if not torch.isfinite(loss):
                     nan_seen = True
                     print("non-finite loss, skipping step", file=sys.stderr)
                     continue
                 loss.backward()
+                if any(
+                    p.grad is not None and not torch.isfinite(p.grad).all()
+                    for p in head.parameters()
+                ):
+                    nan_seen = True
+                    print("non-finite grad, skipping step", file=sys.stderr)
+                    optimizer.zero_grad(set_to_none=True)
+                    continue
                 torch.nn.utils.clip_grad_norm_(head.parameters(), max_grad)
                 optimizer.step()
                 global_step += 1
@@ -297,69 +435,44 @@ def main() -> int:
                 seen += int(batch["gold_index"].size(0))
                 if global_step % int(train_cfg.get("log_every", 5)) == 0:
                     rec = {"phase": "train", "step": global_step, "epoch": epoch + 1, "loss": float(loss.item())}
-                    metrics_f.write(json.dumps(rec) + "\n")
+                    metrics_f.write(dumps_json(rec) + "\n")
                     metrics_f.flush()
                     pbar.set_postfix(loss=float(loss.item()))
                 if global_step % ckpt_steps == 0:
                     _save_head(head, out_dir / f"step_{global_step}.safetensors")
                     _save_head(head, out_dir / "last.safetensors")
-                if use_bea_gate and (time.time() - last_bea_wall) >= ckpt_seconds:
-                    _save_head(head, out_dir / f"wall_{global_step}.safetensors")
-                    bea = evaluate_bea_limit(
-                        head,
-                        config=cfg,
-                        bea_dir=args.bea_dir,
-                        limit=bea_limit,
-                        device=device,
-                        scaler=scaler,
-                        cache_dir=cache_dir,
-                    )
-                    last_bea_wall = time.time()
-                    rec = {"phase": "bea1k", "step": global_step, **{k: v for k, v in bea.items() if k != "ledger"}}
-                    metrics_f.write(json.dumps(rec) + "\n")
-                    metrics_f.flush()
-                    overall = float(bea["overall_accuracy"])
-                    cond = float(bea["conditional_accuracy"])
-                    print(
-                        f"BEA-{bea_limit} step={global_step} overall={overall:.4f} cond={cond:.4f}",
-                        flush=True,
-                    )
-                    if best_bea_overall is None:
-                        best_bea_overall, best_bea_cond = overall, cond
-                        _save_head(head, out_dir / "best_bea.safetensors")
-                    else:
-                        d_over = overall - best_bea_overall
-                        d_cond = cond - best_bea_cond
-                        if overall > best_bea_overall:
-                            best_bea_overall = overall
-                            _save_head(head, out_dir / "best_bea.safetensors")
-                        if cond > best_bea_cond:
-                            best_bea_cond = cond
-                        if d_over <= bea_delta and d_cond <= bea_delta:
-                            stop_reason = (
-                                f"bea-gate: overall {d_over:+.4f} cond {d_cond:+.4f} "
-                                f"not greater than {bea_delta:.2f}"
-                            )
-                            bea_gate_fired = True
-                            break
+                if run_bea_gate():
+                    break
                 if max_steps is not None and global_step >= max_steps:
                     stop_reason = f"max-steps {max_steps}"
                     break
             val = eval_loader(head, valid_loader, device, scaler)
             val_rec = {"phase": "valid", "step": global_step, "epoch": epoch + 1, **val}
-            metrics_f.write(json.dumps(val_rec) + "\n")
+            metrics_f.write(dumps_json(val_rec) + "\n")
             metrics_f.flush()
-            print(f"epoch {epoch+1} val_cond={val['conditional_accuracy']:.4f} loss={val['loss']:.4f}")
-            if val["conditional_accuracy"] > best_val_acc or (
-                math.isclose(val["conditional_accuracy"], max(best_val_acc, 0.0)) and val["loss"] < best_val_loss
+            val_loss = val["loss"]
+            loss_s = "null" if val_loss is None else f"{val_loss:.4f}"
+            print(f"epoch {epoch+1} val_cond={val['conditional_accuracy']:.4f} loss={loss_s}")
+            improved = val["conditional_accuracy"] > best_val_acc
+            if (
+                not improved
+                and val_loss is not None
+                and math.isfinite(val_loss)
+                and math.isclose(val["conditional_accuracy"], max(best_val_acc, 0.0))
+                and val_loss < best_val_loss
             ):
+                improved = True
+            if improved:
                 best_val_acc = val["conditional_accuracy"]
-                best_val_loss = val["loss"]
+                if val_loss is not None and math.isfinite(val_loss):
+                    best_val_loss = val_loss
                 epochs_without_improve = 0
                 _save_head(head, out_dir / "best.safetensors")
             else:
                 epochs_without_improve += 1
             _save_head(head, out_dir / "last.safetensors")
+            if run_bea_gate(force=True):
+                break
             if bea_gate_fired or (max_steps is not None and global_step >= max_steps):
                 break
             if epochs_without_improve >= patience:
@@ -395,8 +508,8 @@ def main() -> int:
         "duration_sec": time.time() - started,
         "output_dir": str(out_dir),
     }
-    (out_dir / "summary.json").write_text(json.dumps(summary, indent=2) + "\n", encoding="utf-8")
-    print(json.dumps({k: v for k, v in summary.items() if k != "h0_dpair"}, indent=2))
+    (out_dir / "summary.json").write_text(dumps_json(summary, indent=2) + "\n", encoding="utf-8")
+    print(dumps_json({k: v for k, v in summary.items() if k != "h0_dpair"}, indent=2))
     if nan_seen:
         return 2
     return 0

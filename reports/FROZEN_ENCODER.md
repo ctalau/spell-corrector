@@ -50,10 +50,18 @@ runs `scripts/runpod/run_frozen_experiment.sh`:
 5. Full 200k + D-pair cache, plus a fixed BEA-60K 1k feature cache for the
    monitoring gate. **Not** a full BEA run.
 6. Train H1 (scalar MLP) → H2 (linear) → H3 (3854→256→64→1 MLP).
-7. Every 30 minutes during an arm: checkpoint and BEA-1k eval. Stop that arm
-   if overall **and** conditional accuracy fail to improve by more than 1
-   percentage point versus the best prior 30-minute checkpoint. Synthetic
-   D-pair patience-2 still applies.
+   H2 linear uses AdamW **3e-4**, input LayerNorm, and train-set encoder RMS
+   scaling. If linear still exits non-zero (`nan_seen` is exit 2), the shell
+   records `artifacts/frozen/heads/linear/failure.json` and **continues to
+   H3**. Only a scalar (H1) failure aborts the experiment. H3 `rc=2` still
+   gets one predeclared 3e-4 retry.
+7. BEA-1k gate during an arm: every 30 minutes, **every 200 steps**, and
+   **once per epoch** (head-only training finishes in minutes, so the
+   wall-clock gate never fired on pod `ww31jci1imkyo9`). Stop that arm if
+   overall **and** conditional accuracy fail to improve by more than 1
+   percentage point versus the best prior BEA-1k checkpoint. Synthetic
+   D-pair patience-2 still applies. `summary.json` writes JSON `null` for
+   non-finite floats (the H2 NaN run produced invalid raw `NaN`).
 8. D-pair evaluation of H0 (Hunspell first candidate) and H1–H3.
 9. HTTP artifact server (`/run.log`, `/STATUS`, `/artifacts/...`) as in the
    existing bootstrap.
@@ -78,3 +86,21 @@ extraction and the real ModernBERT tokenizer download are `@pytest.mark.slow`
 
 Caches live under `artifacts/frozen_cache/` (gitignored). Head weights, plots
 and metrics go to `artifacts/frozen/`.
+
+## H2 NaN abort (pod ww31jci1imkyo9)
+
+Commit `5a3b7ca` trained H0 (d-pair overall 81.56%, cond 82.04%) and H1
+(best val_cond 80.51%, `nan_seen=false`). H2 linear set `nan_seen=true`
+after about one step: unnormalized 3854-d encoder features (including `c*t`
+and `|c-t|`) at lr `1e-3` overflowed. The experiment shell then died with
+`FROZEN EXPERIMENT FAILED: train linear rc=0` — a bash bug: after
+`if cmd; then return 0; fi`, `local rc=$?` is the status of the successful
+`if` compound (0), so a NaN exit-2 was reported as rc=0 and treated as
+fatal. H3 never started, and no BEA-1k checkpoints were written because
+training finished in minutes.
+
+Fixes: capture `rc=$?` immediately after the train command; continue to
+MLP after a linear failure; LayerNorm + encoder RMS scale + linear lr
+`3e-4`; skip non-finite batches and return 2 when `nan_seen`; evaluate
+BEA-1k at least once per epoch and every 200 steps; serialize non-finite
+summary values as `null`.

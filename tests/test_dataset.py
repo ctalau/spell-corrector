@@ -119,3 +119,22 @@ def test_training_construction_does_not_reference_locked_benchmark() -> None:
         text = (root / rel).read_text(encoding="utf-8").lower()
         for marker in FORBIDDEN_MARKERS:
             assert marker not in text, f"{rel} references forbidden marker {marker!r}"
+
+
+def test_available_cpus_respects_container_limits() -> None:
+    """Pool sizing must not be taken from the host's core count.
+
+    Inside a container os.cpu_count() reports the host: a pod allocated 28 vCPU
+    on a 112-core host would otherwise spawn 112 workers and oversubscribe 4x.
+    """
+    import os
+
+    from spelling_reranker.data_build import available_cpus
+
+    n = available_cpus()
+    assert n >= 1
+    assert n <= (os.cpu_count() or 1)
+    try:
+        assert n <= len(os.sched_getaffinity(0))
+    except AttributeError:
+        pass

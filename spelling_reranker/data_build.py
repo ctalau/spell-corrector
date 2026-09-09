@@ -160,6 +160,39 @@ def typos_per_word(rank: int, count: int, *, min_typos: int, max_typos: int) -> 
 # ---------------------------------------------------------------------------
 
 
+def available_cpus() -> int:
+    """CPUs this process may actually use.
+
+    `os.cpu_count()` reports the host's cores, which inside a container is a
+    lie: a Runpod pod advertising 28 vCPU sits on a 112-core host, and sizing a
+    process pool from cpu_count oversubscribes it 4x. Prefer the affinity mask,
+    then the cgroup quota, and take the tightest bound.
+    """
+    limits: list[int] = []
+    try:
+        limits.append(len(os.sched_getaffinity(0)))
+    except (AttributeError, OSError):
+        pass
+
+    # cgroup v2, then v1.
+    try:
+        quota, period = Path("/sys/fs/cgroup/cpu.max").read_text().split()
+        if quota != "max":
+            limits.append(max(1, int(int(quota) / int(period))))
+    except (OSError, ValueError):
+        try:
+            quota = int(Path("/sys/fs/cgroup/cpu/cpu.cfs_quota_us").read_text())
+            period = int(Path("/sys/fs/cgroup/cpu/cpu.cfs_period_us").read_text())
+            if quota > 0 and period > 0:
+                limits.append(max(1, quota // period))
+        except (OSError, ValueError):
+            pass
+
+    if not limits:
+        limits.append(os.cpu_count() or 1)
+    return max(1, min(limits))
+
+
 _WORKER_ENGINE: HunspellEngine | None = None
 
 
@@ -220,7 +253,7 @@ def build_typo_table(
     show_progress: bool = True,
 ) -> tuple[dict[str, list[tuple[str, str, int, str]]], Counter[str]]:
     """Map each word to its usable (typo, kind, gold_index, pool) entries."""
-    n_workers = workers if workers is not None else max(1, (os.cpu_count() or 1))
+    n_workers = workers if workers is not None else available_cpus()
     ranked = [(rank, word, count) for rank, (word, count) in enumerate(vocabulary)]
     shard_size = max(64, len(ranked) // (n_workers * 8) or 1)
     shards = [ranked[i : i + shard_size] for i in range(0, len(ranked), shard_size)]

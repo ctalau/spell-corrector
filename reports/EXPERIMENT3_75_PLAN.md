@@ -184,6 +184,77 @@ Screen E1/E2 arms at 1,000 optimizer updates on a fixed training subset, with `e
 
 Exp2's recorded reference is 3.11 training hours / 3.74 total pod hours on an L40S; historical price was $0.79/hour. These are past observations, not a current quote or a guaranteed cost. Start with a **12 GPU-hour cap** for baseline and data pilots; review results before pretraining or seed confirmation, which need a separately estimated budget. Measure pilot throughput to estimate remaining time. Stop failed/nonfinite runs promptly. Fetch checkpoints, manifests and logs before terminating the specific experiment pod; never terminate unrelated pods.
 
+## 5a. Pod specification and cost estimate
+
+Estimate dated **2026-09-09**, in USD. **Budget $15 for the first stage; approximately $60–$115 for the full gated campaign on Community Cloud. Set aside $120 if proceeding through all stages.** This buys experiments, not a guarantee of reaching 75%. Stop early if the development results fail the gates.
+
+### Use this pod
+
+| Setting | Recommendation |
+|---|---|
+| Provider / product | Runpod GPU Pod, Community Cloud, on-demand/non-interruptible |
+| GPU | **1 × NVIDIA L40S, 48 GB VRAM**; exact GPU ID `NVIDIA L40S` |
+| CPU / host RAM | At least 16 allocated vCPUs and 64 GB RAM; prefer 24–28 vCPUs and 94 GB+ RAM at the same GPU price |
+| Disk | 100 GB container disk; no attached persistent/network volume initially |
+| Runtime | Python 3.11, PyTorch 2.4.1 + CUDA 12.4 (`cu124`), matching the successful exp2 runtime; use a compatible image or install per README |
+| Training | 87M model, bf16, 448-byte maximum; microbatch 128 × accumulation 4 = effective batch 512 |
+| Memory fallback | Microbatch 64 × accumulation 8, only after measuring preflight; keep effective batch unchanged |
+| CPU workers | Start data generation at 8 workers; retain that count until worker-independent seeding is implemented |
+| Lifecycle | Provision for a prepared batch of runs, copy results out, then terminate; do implementation and analysis with the GPU off |
+
+This choice uses the same GPU family on which exp2 completed in 3.11 training hours with about 32.08 GiB observed peak GPU memory. A 24 GB 4090 does not fit that measured configuration unchanged. There is no measured reason yet to pay for multiple GPUs or an H100. Host CPU allocation varies, so slower data preparation is possible even with the same GPU.
+
+If Community L40S is unavailable, select **1 × L40S on Secure Cloud**, keeping the rest of the settings. Budget approximately **$85–$155** for the same campaign there, or set aside $160. Do not silently substitute another GPU and assume the timing estimate remains valid.
+
+Runpod's [L40S page](https://www.runpod.io/gpu-models/l40s) lists $0.79/hour Community and $1.09/hour Secure as checked on the estimate date. These are published reference prices, not reserved capacity or a live pod quote; check the offered CPU/RAM and total rate in the console before deploying.
+
+### Provisioning details that matter
+
+For now, prefer the Runpod console: select the settings above and open its terminal/SSH connection, clone the repo at the intended experiment commit, install the documented runtime, and execute section 4. Do not configure an automatic full-benchmark startup command.
+
+The current `scripts/runpod/launch.py` has three traps:
+
+- Its default GPU preference starts with 24 GB cards. An explicit `--gpu "NVIDIA L40S"` is required when using it.
+- Its `--max-price` argument is **not enforced**: it is printed but is neither sent as a price restriction nor checked before/after creation. Treat it as ineffective until implemented; verify the console quote instead.
+- `--idle` already exists and suppresses the automatic experiment entrypoint, but then cloning, setup and running commands are manual. Without it the launcher runs the old full experiment, including BEA. It also hardcodes Community Cloud and does not constrain CPU/RAM.
+
+The launcher's default CUDA 12.8/PyTorch 2.8 image differs from exp2's successful CUDA 12.4/PyTorch 2.4.1 runtime. Pin and record the selected image tag/digest and installed versions. Check `torch.cuda.is_available()` and run GPU preflight before building data. Do not rely solely on `nvidia-smi`: a driver/runtime mismatch can leave PyTorch unable to use CUDA.
+
+### How the estimate is calculated
+
+Observed exp2 throughput: 8,130 updates / 3.11 training hours. At similar throughput, 1,000 updates take about **23 minutes**; allow **0.5–0.75 pod hours** per pilot for validation and overhead. One full two-epoch run takes about **3–4 pod hours**, costing roughly **$2.40–$3.25** on Community before contingency. Four epochs roughly double the training portion. These estimates assume reused data and comparable validation frequency.
+
+The following is an allocation for a bounded, sequential campaign, not a requirement to spend each allowance. It includes setup, data builds and evaluation while the pod is running.
+
+| Stage | Assumed scope | Pod hours |
+|---|---|---:|
+| E0 + first E1/E2 screen | Baseline recovery/retraining as needed, initial short pilots; stop at this checkpoint | 12 |
+| Remaining E1/E2 | Additional pilots and admitted full data finalists | 12–22 |
+| E3 | Masked-byte pretraining pilot(s), ranking finetunes and controls | 12–24 |
+| E4/E5 | Feature ablations and one longer-training comparison | 8–20 |
+| E6 | Four additional seed runs: winner/control × two new seeds; 2–4 epochs each | 13–26 |
+| Freeze and final evaluation | Independent test, final BEA, artifact transfer | 3–6 |
+| **Total if all stages proceed** | Reuse already trained controls; no exhaustive grid | **60–110** |
+
+Pretraining throughput has not been measured; the E3 row is a time allowance, not a prediction derived from corpus bytes. After its first pilot, estimate runtime from measured bytes/second and reduce scope or revise the budget before exceeding the allowance. Likewise, the existing 12-hour first-stage cap may defer extra baseline reruns to the next stage.
+
+[Runpod storage pricing](https://docs.runpod.io/pods/pricing) lists container storage at $0.10/GB/month, billed per second. Using a 720-hour month for estimation, 100 GB adds about $0.014/hour. Confirm whether the console's total already includes storage to avoid double-counting.
+
+`estimated cost = pod hours × (GPU hourly rate + storage hourly rate) × 1.25`
+
+The 25% contingency covers modest failures, slower CPU setup and idle time:
+
+| Scope | Community at $0.79/h | Secure at $1.09/h |
+|---|---:|---:|
+| First 12 hours, including storage + contingency | about $12.06; budget **$15** | about $16.56; budget **$20** |
+| Full 60–110 hours, including storage + contingency | about $60.29–$110.53; budget **$60–$115** | about $82.79–$151.78; budget **$85–$155** |
+
+Taxes, paid dataset licenses/annotation, developer time, external backup storage and any external transfer charges are excluded. The authentic contextual development set is the largest unpriced dependency: collecting/reviewing it and implementing the plan may cost substantially more than GPU rental. No paid labeling or model API is assumed.
+
+These are manual spending gates, not an implemented automatic billing stop. Record actual pod rate and creation/termination timestamps in the run ledger. Do not leave the GPU running between workdays. Download and verify artifacts before stopping or terminating: the selected container disk is temporary.
+
+For terminology and the reasoning behind each experiment, see [the developer explainer](EXPERIMENT3_DEVELOPER_GUIDE.md).
+
 ## 6. Freeze, benchmark once, and decide
 
 Before accessing BEA again, commit the winning config, checkpoint hash, candidate policy, selection rule, data manifests and completed development table. Use seed 1337 as the primary reporting checkpoint; the other seeds measure variance rather than provide three attempts at the benchmark. Evaluate the sealed independent test only after selection.

@@ -64,9 +64,13 @@ fi
 
 status "cloning"
 # Skip LFS: the committed parquet is stale and gets rebuilt anyway.
-GIT_LFS_SKIP_SMUDGE=1 git clone --depth 1 -b "${REPO_BRANCH}" "${REPO_URL}" \
+GIT_LFS_SKIP_SMUDGE=1 git clone -b "${REPO_BRANCH}" "${REPO_URL}" \
   /workspace/spell-corrector || fail "clone"
 cd /workspace/spell-corrector
+if [ -n "${REPO_COMMIT:-}" ]; then
+    git checkout -q "${REPO_COMMIT}" || fail "checkout ${REPO_COMMIT}"
+fi
+echo "running commit $(git rev-parse HEAD)"
 export REPO_DIR=/workspace/spell-corrector
 export PYTHONPATH=/workspace/spell-corrector
 export PYTHON

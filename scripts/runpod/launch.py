@@ -77,14 +77,30 @@ def main() -> int:
     parser.add_argument("--wait", type=int, default=600, help="seconds to wait for RUNNING")
     parser.add_argument("--repo-url", default="https://github.com/ctalau/spell-corrector")
     parser.add_argument("--branch", default="main")
+    parser.add_argument("--commit", default=None, help="exact revision (default: branch head)")
     parser.add_argument("--target-train", type=int, default=3_000_000)
     parser.add_argument("--target-valid", type=int, default=60_000)
     parser.add_argument("--config", default="configs/train_full.yaml")
     parser.add_argument("--idle", action="store_true", help="do not auto-run the experiment")
     args = parser.parse_args()
 
+    # Pin to an exact commit rather than the branch name. raw.githubusercontent
+    # caches branch paths for minutes, so a freshly pushed fix is not
+    # necessarily what the pod would fetch -- and the pod should run a known
+    # revision anyway.
+    commit = args.commit
+    if not commit:
+        slug = args.repo_url.rstrip("/").removeprefix("https://github.com/")
+        ref = requests.get(
+            f"https://api.github.com/repos/{slug}/commits/{args.branch}",
+            headers={"Accept": "application/vnd.github.sha", **HEADERS},
+            timeout=60,
+        )
+        if ref.status_code >= 400:
+            raise SystemExit(f"cannot resolve {args.branch}: {ref.status_code} {ref.text[:200]}")
+        commit = ref.text.strip()
     raw_base = args.repo_url.replace("https://github.com/", "https://raw.githubusercontent.com/")
-    bootstrap_url = f"{raw_base}/{args.branch}/scripts/runpod/bootstrap.sh"
+    bootstrap_url = f"{raw_base}/{commit}/scripts/runpod/bootstrap.sh"
 
     gpus = args.gpu or GPU_PREFERENCE
     payload = {
@@ -101,6 +117,7 @@ def main() -> int:
         "env": {
             "REPO_URL": args.repo_url,
             "REPO_BRANCH": args.branch,
+            "REPO_COMMIT": commit,
             "TARGET_TRAIN": str(args.target_train),
             "TARGET_VALID": str(args.target_valid),
             "CONFIG": args.config,
@@ -140,6 +157,7 @@ def main() -> int:
         )
         payload["dockerEntrypoint"] = ["/bin/bash", "-lc", entry]
         payload["dockerStartCmd"] = []
+        print(f"commit:    {commit}")
         print(f"bootstrap: {bootstrap_url}")
     print(f"creating pod over {gpus} (<= ${args.max_price}/hr)...")
     pod = api("/pods", "POST", payload)

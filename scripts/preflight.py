@@ -27,6 +27,7 @@ if str(ROOT) not in sys.path:
 from spelling_reranker.byte_encoding import N_CANDIDATE_SLOTS, VOCAB_SIZE
 from spelling_reranker.config import load_train_config, model_config_from_mapping
 from spelling_reranker.dataset import collate_examples
+from spelling_reranker.device import describe_cuda, select_training_device
 from spelling_reranker.model import (
     ByteSpellingReranker,
     apply_byte_masking,
@@ -136,13 +137,13 @@ def main() -> int:
     args = parser.parse_args()
 
     configs = args.configs or sorted((ROOT / "configs").glob("train_*.yaml"))
-    device = torch.device(args.device or ("cuda" if torch.cuda.is_available() else "cpu"))
+    device = select_training_device(args.device)
     amp_dtype = (
         torch.bfloat16
         if device.type == "cuda" and torch.cuda.is_bf16_supported()
         else None
     )
-    print(f"preflight on {device} (bf16={amp_dtype is not None})")
+    print(f"preflight on {device} (bf16={amp_dtype is not None}){describe_cuda(device)}")
     for path in configs:
         check(path, device, amp_dtype)
     print("preflight OK")

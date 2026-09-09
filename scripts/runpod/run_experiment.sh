@@ -27,6 +27,23 @@ trap 'kill "$SAMPLER_PID" 2>/dev/null || true' EXIT
 
 die() { echo "EXPERIMENT FAILED: $1"; exit 1; }
 
+# Refuse CPU fallback before any expensive work. A driver/image CUDA mismatch
+# (e.g. host 12.4 vs cu128 torch) makes torch.cuda.is_available() False while
+# nvidia-smi still works; training would then silently run on CPU for hours.
+log "CUDA check"
+nvidia-smi || echo "nvidia-smi unavailable"
+"${PYTHON:-python}" - <<'PY' || die "CUDA not available"
+import torch
+print("torch", torch.__version__)
+print("torch.version.cuda", torch.version.cuda)
+print("cuda available", torch.cuda.is_available())
+assert torch.cuda.is_available(), (
+    "CUDA is not available; refusing to train on CPU. "
+    f"torch={torch.__version__} torch.version.cuda={torch.version.cuda}"
+)
+print("device", torch.cuda.get_device_name(0))
+PY
+
 log "unit tests"
 "${PYTHON:-python}" -m pytest tests/ -q || die "unit tests"
 

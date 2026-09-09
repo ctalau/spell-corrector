@@ -28,6 +28,7 @@ from safetensors.torch import save_file
 from spelling_reranker.byte_encoding import special_tokens_map
 from spelling_reranker.config import load_train_config, model_config_from_mapping
 from spelling_reranker.dataset import LengthBucketBatchSampler, SpellingParquetDataset, make_collate
+from spelling_reranker.device import describe_cuda, select_training_device
 from spelling_reranker.hunspell import collect_hunspell_metadata
 from spelling_reranker.model import (
     ByteSpellingReranker,
@@ -194,7 +195,8 @@ def main() -> int:
     out_cfg = cfg["output"]
     model_cfg = model_config_from_mapping(cfg.get("model"))
 
-    device = torch.device(args.device or ("cuda" if torch.cuda.is_available() else "cpu"))
+    device = select_training_device(args.device)
+    print(f"device={device}{describe_cuda(device)}")
     want_bf16 = str(train_cfg.get("dtype", "bf16")).lower() == "bf16"
     use_amp = device.type == "cuda" and want_bf16 and torch.cuda.is_bf16_supported()
     amp_dtype = torch.bfloat16 if use_amp else None

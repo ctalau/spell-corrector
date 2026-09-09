@@ -78,6 +78,20 @@ export PYTHON
 status "setup"
 bash scripts/runpod/setup.sh || fail "setup"
 
+status "checking CUDA"
+nvidia-smi || echo "nvidia-smi unavailable"
+"$PYTHON" - <<'PY' || fail "CUDA not available"
+import torch
+print("torch", torch.__version__)
+print("torch.version.cuda", torch.version.cuda)
+print("cuda available", torch.cuda.is_available())
+assert torch.cuda.is_available(), (
+    "CUDA is not available; refusing to train on CPU. "
+    f"torch={torch.__version__} torch.version.cuda={torch.version.cuda}"
+)
+print("device", torch.cuda.get_device_name(0))
+PY
+
 status "experiment"
 TARGET_TRAIN="${TARGET_TRAIN:-3000000}" \
 TARGET_VALID="${TARGET_VALID:-60000}" \

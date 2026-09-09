@@ -7,12 +7,12 @@
 #   * apt and pip run concurrently -- they contend for nothing;
 #   * the WikiText download starts immediately, in parallel with both.
 #
-# The Python Hunspell binding comes from apt (python3-hunspell), not pip.
-# `pip install hunspell==0.5.5` builds from source and fails on any modern
-# setuptools, and the usual workaround -- pinning setuptools<60 -- is itself
-# broken on Python 3.12, which has no distutils for old setuptools to patch.
-# The distro package is the same 0.5.5, already compiled against the running
-# interpreter. The pip build is kept only as a fallback.
+# The Hunspell *library* comes from apt (libhunspell-dev + dictionaries).
+# The Python binding must be pip-installed into $PYTHON: apt python3-hunspell
+# is compiled for distro Python (/usr/bin/python3), while Runpod images put
+# torch on a different interpreter (often /usr/local/bin/python).
+# hunspell==0.5.5 still uses distutils; on Python 3.11 pin setuptools<60 and
+# disable build isolation so pip uses that copy.
 set -uo pipefail
 
 REPO_DIR="${REPO_DIR:-/workspace/spell-corrector}"
@@ -21,6 +21,20 @@ cd "$REPO_DIR"
 
 log() { printf '\n=== %s (%ss) ===\n' "$1" "$SECONDS"; }
 die() { echo "SETUP FAILED: $1"; exit 1; }
+
+log "CUDA check ($PYTHON)"
+nvidia-smi || echo "nvidia-smi unavailable"
+"$PYTHON" - <<'PY' || die "CUDA not available"
+import torch
+print("torch", torch.__version__)
+print("torch.version.cuda", torch.version.cuda)
+print("cuda available", torch.cuda.is_available())
+assert torch.cuda.is_available(), (
+    "CUDA is not available; refusing to continue. "
+    f"torch={torch.__version__} torch.version.cuda={torch.version.cuda}"
+)
+print("gpu", torch.cuda.get_device_name(0), "bf16", torch.cuda.is_bf16_supported())
+PY
 
 log "apt + pip + data download in parallel"
 
@@ -49,26 +63,33 @@ log "apt done"
 wait "$PIP_PID" || { tail -30 /tmp/pip.log; die "pip"; }
 log "pip done"
 
-if ! "$PYTHON" -c "import hunspell" 2>/dev/null; then
-  log "apt binding not importable; falling back to building hunspell from pip"
-  "$PYTHON" -m pip install -q "setuptools<81" wheel
-  "$PYTHON" -m pip install -q --no-build-isolation hunspell==0.5.5 \
-    || die "no usable hunspell binding"
-fi
+log "hunspell pip binding ($PYTHON)"
+"$PYTHON" -m pip install -q "setuptools<60" wheel cython
+"$PYTHON" -m pip install -q --no-build-isolation hunspell==0.5.5 \
+  || die "hunspell pip install into ${PYTHON}"
+"$PYTHON" -c "import hunspell; print(hunspell.__file__)" || die "import hunspell ($PYTHON)"
 
 wait "$DATA_PID" || { tail -30 /tmp/data.log; die "wikitext download"; }
 log "wikitext download done"
 
 log "verifying"
-"$PYTHON" - <<'PY' || exit 1
+nvidia-smi || echo "nvidia-smi unavailable"
+"$PYTHON" -c "import hunspell; print(hunspell.__file__)" || die "import hunspell ($PYTHON)"
+"$PYTHON" - <<'PY' || die "verify"
+import hunspell
 import torch
 from spelling_reranker.hunspell import default_engine
 from spelling_reranker.model import ByteSpellingReranker, count_parameters
 from spelling_reranker.config import load_yaml, model_config_from_mapping
 
+print("hunspell", hunspell.__file__)
 print("torch", torch.__version__, "cuda", torch.version.cuda, "avail", torch.cuda.is_available())
-if torch.cuda.is_available():
-    print("gpu", torch.cuda.get_device_name(0), "bf16", torch.cuda.is_bf16_supported())
+if not torch.cuda.is_available():
+    raise SystemExit(
+        "CUDA is not available; refusing to continue. "
+        f"torch={torch.__version__} torch.version.cuda={torch.version.cuda}"
+    )
+print("gpu", torch.cuda.get_device_name(0), "bf16", torch.cuda.is_bf16_supported())
 engine = default_engine()
 assert engine.suggest("recieve"), "hunspell returned no suggestions"
 print("hunspell suggest('recieve') ->", engine.suggest("recieve"))

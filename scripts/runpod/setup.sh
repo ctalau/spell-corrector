@@ -119,7 +119,7 @@ log "pip deps + hunspell into $VENV"
 pip_install /tmp/pip-upgrade.log --upgrade pip || die "pip upgrade"
 # Everything except torch, which the image already provides.
 pip_install /tmp/pip-deps.log \
-  numpy pandas pyarrow tqdm pyyaml safetensors matplotlib requests pytest \
+  numpy pandas pyarrow tqdm pyyaml safetensors matplotlib requests pytest pytest-timeout \
   "transformers>=4.48,<5" tokenizers huggingface_hub accelerate \
   || die "pip deps"
 

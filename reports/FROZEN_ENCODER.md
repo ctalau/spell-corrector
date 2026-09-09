@@ -37,7 +37,13 @@ Equivalent: `--config configs/train_frozen_modernbert.yaml` alone sets
 runs `scripts/runpod/run_frozen_experiment.sh`:
 
 1. Fail-fast CUDA check, install `transformers>=4.48,<5`, and assert `AutoModel` imports.
-2. Unit tests.
+2. Fast unit tests (`pytest tests/ -q -m "not slow" --timeout=120` under
+   `timeout 600`). Tests that download `answerdotai/ModernBERT-base`, run CUDA
+   extract, or train the byte-level overfit set are `@pytest.mark.slow` and are
+   skipped here so a hung HF download cannot burn GPU hours. Default coverage
+   uses `DummyTokenizer` / `DummyBackbone` on CPU (seconds). Real-encoder smoke
+   is step 4 (`cache_frozen_features.py --smoke-examples`), not pytest.
+   Opt-in locally: `RUN_SLOW=1 pytest tests/ -m slow`.
 3. Synthetic data build if parquet is missing (400k/40k targets, then a
    deterministic 200k-by-example-id subset plus D-pair).
 4. Smoke feature cache (10k examples).
@@ -67,7 +73,8 @@ python scripts/evaluate_frozen_selector.py --config configs/train_frozen_modernb
 ```
 
 CPU unit tests use a dummy encoder (`--dummy-encoder` on the cache script). GPU
-extraction tests skip when CUDA is absent.
+extraction and the real ModernBERT tokenizer download are `@pytest.mark.slow`
+(skipped on the pod gate; skip without CUDA / without `RUN_SLOW=1` locally).
 
 Caches live under `artifacts/frozen_cache/` (gitignored). Head weights, plots
 and metrics go to `artifacts/frozen/`.

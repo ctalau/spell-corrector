@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import os
 import subprocess
 import sys
 from pathlib import Path
@@ -21,6 +22,8 @@ from evaluate_frozen_selector import score_bundle
 from spelling_reranker.byte_encoding import nfc
 from spelling_reranker.candidates import FROZEN_CANDIDATE_SLOTS, first_ten_pool, gold_index
 from spelling_reranker.frozen_encoder import (
+    DEFAULT_ENCODER_ID,
+    DEFAULT_ENCODER_REVISION,
     MLP_INPUT_DIM,
     FrozenEncoder,
     FrozenSelector,
@@ -133,6 +136,7 @@ def test_mlp_overfits_32_solvable_examples() -> None:
     assert acc >= 0.95, acc
 
 
+@pytest.mark.slow
 @pytest.mark.skipif(not torch.cuda.is_available(), reason="CUDA not available")
 def test_gpu_extract_skips_without_cuda_or_runs_on_gpu() -> None:
     device = torch.device("cuda")
@@ -260,26 +264,31 @@ def test_cache_key_changes_when_policy_changes() -> None:
     assert k1["key_sha256"] != k4["key_sha256"]
 
 
-def test_modernbert_tokenizer_does_not_add_specials() -> None:
-    tok = load_tokenizer()
-    n_before = len(tok)
-    ex = serialize_frozen_example(
-        "see the ",
-        "the",
-        " cat",
-        ["the", "teh"] + [None] * 8,
-        tokenizer=tok,
-        gold_index_value=0,
+def test_load_tokenizer_is_mocked_and_does_not_hit_the_network(monkeypatch) -> None:
+    class _FakeTok:
+        def __len__(self) -> int:
+            return 50_000
+
+    seen: dict[str, object] = {}
+
+    def fake_from_pretrained(model_id: str, revision: str | None = None, **kwargs: object) -> _FakeTok:
+        seen["model_id"] = model_id
+        seen["revision"] = revision
+        seen["kwargs"] = kwargs
+        return _FakeTok()
+
+    monkeypatch.setattr(
+        "spelling_reranker.frozen_encoder.AutoTokenizer.from_pretrained",
+        fake_from_pretrained,
     )
-    assert len(tok) == n_before
-    assert not ex.serialization_failed
-    assert ex.typo_token_indices
-    assert ex.candidate_token_indices[0]
-    assert set(ex.typo_token_indices).isdisjoint(set(ex.candidate_token_indices[0]))
-    # Tokens covering the typo should decode to the typo, not the context "the".
-    typo_ids = [ex.input_ids[i] for i in ex.typo_token_indices]
-    piece = tok.decode(typo_ids)
-    assert "the" in piece.lower()
+    tok = load_tokenizer()
+    assert isinstance(tok, _FakeTok)
+    assert seen["model_id"] == DEFAULT_ENCODER_ID
+    assert seen["revision"] == DEFAULT_ENCODER_REVISION
+    assert len(tok) == 50_000
+
+
+def test_dummy_tokenizer_does_not_add_specials() -> None:
     tok = DummyTokenizer()
     ex = serialize_frozen_example(
         "see the ",
@@ -298,6 +307,32 @@ def test_modernbert_tokenizer_does_not_add_specials() -> None:
     assert set(ex.typo_token_indices).isdisjoint(ex.candidate_token_indices[0])
     ctx_tokens = set(ex.context_token_indices)
     assert ctx_tokens.isdisjoint(ex.typo_token_indices)
+
+
+@pytest.mark.slow
+@pytest.mark.skipif(
+    os.environ.get("RUN_SLOW", "") not in {"1", "true", "yes"},
+    reason="downloads answerdotai/ModernBERT-base; set RUN_SLOW=1",
+)
+def test_modernbert_tokenizer_does_not_add_specials() -> None:
+    tok = load_tokenizer()
+    n_before = len(tok)
+    ex = serialize_frozen_example(
+        "see the ",
+        "the",
+        " cat",
+        ["the", "teh"] + [None] * 8,
+        tokenizer=tok,
+        gold_index_value=0,
+    )
+    assert len(tok) == n_before
+    assert not ex.serialization_failed
+    assert ex.typo_token_indices
+    assert ex.candidate_token_indices[0]
+    assert set(ex.typo_token_indices).isdisjoint(set(ex.candidate_token_indices[0]))
+    typo_ids = [ex.input_ids[i] for i in ex.typo_token_indices]
+    piece = tok.decode(typo_ids)
+    assert "the" in piece.lower()
 
 
 def test_unicode_and_punctuation_offsets() -> None:
@@ -460,6 +495,8 @@ def test_dummy_cache_and_head_train_smoke(tmp_path) -> None:
             str(cfg),
             "--dummy-encoder",
             "--allow-cpu",
+            "--device",
+            "cpu",
             "--smoke-examples",
             "40",
             "--cache-dir",
@@ -481,6 +518,8 @@ def test_dummy_cache_and_head_train_smoke(tmp_path) -> None:
             "--arm",
             "mlp",
             "--allow-cpu",
+            "--device",
+            "cpu",
             "--no-bea-gate",
             "--max-steps",
             "3",
@@ -511,12 +550,19 @@ def test_frozen_pins_transformers_4x_and_cu124_py311_image():
     pin = "transformers>=4.48,<5"
     pyproject = (ROOT / "pyproject.toml").read_text()
     assert f'"{pin}"' in pyproject
+    assert "pytest-timeout" in pyproject
     setup = (ROOT / "scripts/runpod/setup.sh").read_text()
     assert f'"{pin}"' in setup
     assert "skip setuptools<60" in setup
     frozen_sh = (ROOT / "scripts/runpod/run_frozen_experiment.sh").read_text()
     assert f'"{pin}"' in frozen_sh
     assert "cannot import torch/AutoModel" in frozen_sh
+    assert '-m "not slow"' in frozen_sh
+    assert "--timeout=120" in frozen_sh
+    assert "--timeout-method=signal" in frozen_sh
+    assert "timeout 600" in frozen_sh
+    assert "pytest-timeout" in frozen_sh
+    assert "pytest-timeout" in setup
     launch = (ROOT / "scripts/runpod/launch.py").read_text()
     assert 'FROZEN_IMAGE = "runpod/pytorch:2.4.0-py3.11-cuda12.4.1-devel-ubuntu22.04"' in launch
 

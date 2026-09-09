@@ -1,0 +1,38 @@
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.eggs/
+dist/
+build/
+.venv/
+venv/
+.env
+.env.*
+
+# Tests / tools
+.pytest_cache/
+.coverage
+htmlcov/
+.mypy_cache/
+.ruff_cache/
+.tox/
+
+# Editors
+.idea/
+.vscode/
+*.swp
+
+# Data that must not be committed
+data/raw/
+data/bea60k/
+data/cache/
+*.zip
+
+# Local logs / scratch
+*.log
+tmp/
+.cache/
+
+# OS
+.DS_Store

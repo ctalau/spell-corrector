@@ -138,3 +138,57 @@ def test_available_cpus_respects_container_limits() -> None:
         assert n <= len(os.sched_getaffinity(0))
     except AttributeError:
         pass
+
+
+def test_chunked_parquet_write_survives_a_null_only_chunk(tmp_path) -> None:
+    """Row groups must share one schema regardless of what a chunk contains.
+
+    pandas infers dtypes per chunk, so a chunk whose `cand_15` is entirely null
+    infers as null instead of string and the next chunk fails to append with
+    "Table schema does not match schema used to create file". This killed a
+    3M-example build 13% of the way in.
+    """
+    import pyarrow.parquet as pq
+
+    from spelling_reranker.data_build import write_split
+
+    def rows():
+        # First chunk: only two candidates ever populated.
+        for i in range(4):
+            row = {
+                "example_id": f"a{i}", "source": "fixture",
+                "context_before": "the ", "typo": "teh", "context_after": " cat",
+                "gold": "the", "gold_index": 0, "corruption_type": "x",
+                "source_document_id": "d", "original_sentence_hash": "h",
+            }
+            for c in range(N_CANDIDATE_SLOTS):
+                row[f"cand_{c}"] = "the" if c < 2 else None
+            yield row
+        # Second chunk: every slot populated.
+        for i in range(4):
+            row = {
+                "example_id": f"b{i}", "source": "fixture",
+                "context_before": "a ", "typo": "hosue", "context_after": " here",
+                "gold": "house", "gold_index": 0, "corruption_type": "x",
+                "source_document_id": "d", "original_sentence_hash": "h",
+            }
+            for c in range(N_CANDIDATE_SLOTS):
+                row[f"cand_{c}"] = f"w{c}"
+            yield row
+
+    out = tmp_path / "train.parquet"
+    n = write_split(rows(), out, chunk_size=4)
+    assert n == 8
+    table = pq.read_table(out)
+    assert table.num_rows == 8
+    assert str(table.schema.field("cand_15").type) == "string"
+
+
+def test_empty_split_still_writes_a_valid_file(tmp_path) -> None:
+    import pyarrow.parquet as pq
+
+    from spelling_reranker.data_build import write_split
+
+    out = tmp_path / "empty.parquet"
+    assert write_split(iter(()), out, chunk_size=4) == 0
+    assert pq.read_table(out).num_rows == 0

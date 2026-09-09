@@ -536,6 +536,33 @@ def generate_examples(*args, **kwargs) -> tuple[list[dict], BuildStats]:
 # ---------------------------------------------------------------------------
 
 
+def example_schema() -> "pa.Schema":
+    """Explicit Arrow schema for the example table.
+
+    Parquet row groups must all share one schema, and pandas infers dtypes per
+    chunk: a chunk where some `cand_i` column happens to be entirely null
+    infers as null rather than string, and the next chunk then fails to append
+    with "Table schema does not match schema used to create file". Pinning the
+    schema removes the inference entirely.
+    """
+    import pyarrow as pa
+
+    fields = [
+        ("example_id", pa.string()),
+        ("source", pa.string()),
+        ("context_before", pa.string()),
+        ("typo", pa.string()),
+        ("context_after", pa.string()),
+        ("gold", pa.string()),
+        *[(f"cand_{i}", pa.string()) for i in range(N_CANDIDATES)],
+        ("gold_index", pa.int8()),
+        ("corruption_type", pa.string()),
+        ("source_document_id", pa.string()),
+        ("original_sentence_hash", pa.string()),
+    ]
+    return pa.schema(fields)
+
+
 def rows_to_frame(rows: list[dict]) -> pd.DataFrame:
     columns = [
         "example_id",
@@ -570,6 +597,7 @@ def write_split(
     import pyarrow.parquet as pq
 
     path.parent.mkdir(parents=True, exist_ok=True)
+    schema = example_schema()
     writer: "pq.ParquetWriter | None" = None
     buffer: list[dict] = []
     total = 0
@@ -578,9 +606,9 @@ def write_split(
         nonlocal writer, buffer, total
         if not buffer:
             return
-        table = pa.Table.from_pandas(rows_to_frame(buffer), preserve_index=False)
+        table = pa.Table.from_pandas(rows_to_frame(buffer), schema=schema, preserve_index=False)
         if writer is None:
-            writer = pq.ParquetWriter(str(path), table.schema)
+            writer = pq.ParquetWriter(str(path), schema)
         writer.write_table(table)
         total += len(buffer)
         buffer = []
@@ -593,9 +621,8 @@ def write_split(
         _flush()
         if writer is None:
             # Nothing generated: still emit a valid empty file with the schema.
-            table = pa.Table.from_pandas(rows_to_frame([]), preserve_index=False)
-            writer = pq.ParquetWriter(str(path), table.schema)
-            writer.write_table(table)
+            writer = pq.ParquetWriter(str(path), schema)
+            writer.write_table(pa.Table.from_pandas(rows_to_frame([]), schema=schema, preserve_index=False))
     finally:
         if writer is not None:
             writer.close()

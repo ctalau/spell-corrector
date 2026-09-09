@@ -1,0 +1,22 @@
+{
+  "PAD": 256,
+  "CLS": 257,
+  "LANG_EN": 258,
+  "CTX_START": 259,
+  "CTX_END": 260,
+  "TYPO_START": 261,
+  "TYPO_END": 262,
+  "CAND_0": 263,
+  "CAND_1": 264,
+  "CAND_2": 265,
+  "CAND_3": 266,
+  "CAND_4": 267,
+  "CAND_5": 268,
+  "CAND_6": 269,
+  "CAND_7": 270,
+  "CAND_8": 271,
+  "CAND_9": 272,
+  "CAND_END": 273,
+  "BYTE_VOCAB": 256,
+  "VOCAB_SIZE": 274
+}

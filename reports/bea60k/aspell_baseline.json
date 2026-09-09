@@ -1,0 +1,15 @@
+{
+  "n": 68429,
+  "aspell_top1": 0.6055327419661255,
+  "no_suggestion": 547,
+  "correct": 41436,
+  "metadata": {
+    "aspell_version": "@(#) International Ispell Version 3.1.20 (but really Aspell 0.60.8.1)",
+    "lang": "en_US",
+    "os": {
+      "system": "Linux",
+      "release": "6.8.0-57-generic",
+      "platform": "Linux-6.8.0-57-generic-x86_64-with-glibc2.39"
+    }
+  }
+}

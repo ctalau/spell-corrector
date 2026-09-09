@@ -1,0 +1,32 @@
+{
+  "seed": 1337,
+  "files": {
+    "train": {
+      "path": "data/processed/train.parquet",
+      "n": 2081171,
+      "sha256": "77f615b157f434ca3b1b6e8f59f8e9e6ec1254332eb949a2a52cef168c42bfd5",
+      "bytes": 434408161
+    },
+    "validation": {
+      "path": "data/processed/validation.parquet",
+      "n": 20773,
+      "sha256": "7c82182a3c33e155c83626941f1a76f4d37d90209a2c7749a5d39dd026166a49",
+      "bytes": 3606794
+    }
+  },
+  "source": {
+    "dataset": "WikiText-103 raw",
+    "config": "wikitext-103-raw-v1",
+    "identifier": "Salesforce/wikitext wikitext-103-raw-v1",
+    "license": "CC BY-SA",
+    "train_file": "data/raw/wikitext-103-raw/wiki.train.raw",
+    "valid_file": "data/raw/wikitext-103-raw/wiki.valid.raw",
+    "download": "scripts/download_sources.py",
+    "split_policy": "official WikiText train/valid article files"
+  },
+  "notes": [
+    "Synthetic typos derived from WikiText-103 raw only.",
+    "Candidate pools come from Hunspell suggestions only.",
+    "Held-out benchmark data is never used here."
+  ]
+}

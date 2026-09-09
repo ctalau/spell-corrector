@@ -22,8 +22,11 @@ training:
   scheduler: cosine
   max_grad_norm: 1.0
   effective_batch_size: 512
-  microbatch: 256
-  grad_accumulation: 2
+  # 256 OOMed on a 44.5GB L40S at step 18: length bucketing means most batches
+  # are short, so the peak only arrives when a max-length batch does. 128 halves
+  # activation memory to ~21GB while keeping the effective batch at 512.
+  microbatch: 128
+  grad_accumulation: 4
   num_workers: 16
   pin_memory: true
   compile: false

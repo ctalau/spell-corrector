@@ -37,21 +37,31 @@ from spelling_reranker.model import (
 from spelling_reranker.serialization import serialize_example
 
 
-def _batch(n: int, max_seq_len: int):
+def _worst_case_batch(n: int, max_seq_len: int):
+    """A full microbatch of maximum-length sequences.
+
+    Peak memory is set by the longest batch, not the average one. With length
+    bucketing most batches are short, so an undersized microbatch can train for
+    tens of steps before the first max-length batch OOMs it in backward -- which
+    is exactly how a 256 microbatch died at step 18, 25 minutes into a run.
+    """
+    filler = "wordy context " * (max_seq_len // 7)
     examples = []
     for i in range(n):
-        cands = [f"cand{j}" for j in range(N_CANDIDATE_SLOTS)]
+        cands = [f"candidate{j}" for j in range(N_CANDIDATE_SLOTS)]
         examples.append(
             serialize_example(
-                f"some left context number {i} here ",
+                filler,
                 "teh",
-                " and some right context after it",
+                filler,
                 cands,
                 gold_index=i % N_CANDIDATE_SLOTS,
                 max_seq_len=max_seq_len,
             )
         )
-    return collate_examples(examples)
+    batch = collate_examples(examples)
+    assert batch["token_ids"].shape[1] == max_seq_len, "worst-case batch is not full length"
+    return batch
 
 
 def check(config_path: Path, device: torch.device, amp_dtype) -> None:
@@ -67,7 +77,13 @@ def check(config_path: Path, device: torch.device, amp_dtype) -> None:
     model = ByteSpellingReranker(model_cfg).to(device)
     model.train()
     optimizer = torch.optim.AdamW(model.parameters(), lr=1e-5)
-    batch = {k: v.to(device) for k, v in _batch(8, model_cfg.max_seq_len).items()}
+    microbatch = int(train_cfg.get("microbatch", 8))
+    if device.type == "cuda":
+        torch.cuda.reset_peak_memory_stats()
+    batch = {
+        k: v.to(device)
+        for k, v in _worst_case_batch(microbatch, model_cfg.max_seq_len).items()
+    }
 
     # Always exercise the masking path, whatever the config's weight, so a
     # vocabulary that cannot represent MASK is caught here rather than later.
@@ -91,10 +107,25 @@ def check(config_path: Path, device: torch.device, amp_dtype) -> None:
 
     if not torch.isfinite(loss):
         raise SystemExit(f"{config_path}: non-finite loss {loss.item()}")
+    peak = torch.cuda.max_memory_allocated() / 1024**3 if device.type == "cuda" else 0.0
+    total = (
+        torch.cuda.get_device_properties(0).total_memory / 1024**3
+        if device.type == "cuda"
+        else 0.0
+    )
+    note = ""
+    if device.type == "cuda":
+        note = f", peak {peak:.1f}/{total:.1f} GiB"
+        if peak > 0.85 * total:
+            raise SystemExit(
+                f"{config_path}: worst-case batch peaks at {peak:.1f} GiB of "
+                f"{total:.1f} GiB. Lower microbatch (and raise grad_accumulation "
+                "to keep the effective batch)."
+            )
     print(
         f"  {config_path.name}: {count_parameters(model):,} params, "
         f"vocab {model_cfg.vocab_size}, seq {model_cfg.max_seq_len}, "
-        f"loss {loss.item():.4f} OK"
+        f"microbatch {microbatch}, loss {loss.item():.4f} OK{note}"
     )
 
 

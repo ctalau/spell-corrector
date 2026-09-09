@@ -13,6 +13,9 @@ TARGET_VALID="${TARGET_VALID:-60000}"
 CONFIG="${CONFIG:-configs/train_full.yaml}"
 cd "$REPO_DIR"
 export PYTHONPATH="$REPO_DIR"
+# Length bucketing makes batch memory vary a lot, which fragments the caching
+# allocator; expandable segments let it reuse those blocks.
+export PYTORCH_CUDA_ALLOC_CONF="${PYTORCH_CUDA_ALLOC_CONF:-expandable_segments:True}"
 
 log() { printf '\n########## %s (t=%ss) ##########\n' "$1" "$SECONDS"; }
 

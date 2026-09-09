@@ -90,8 +90,9 @@ Minimum acceptable full run: 150k train / 10k valid. Outputs:
 - `data/processed/manifest.json`
 - `artifacts/hunspell_metadata.json`
 
-A smaller committed sample may be present under `data/processed/` for smoke
-tests. Rebuild the full set on the training machine if counts are below target.
+Committed processed data (Git LFS): **235,626 train / 19,642 valid** examples
+(above the 150k/10k minimum; WikiText heading boilerplate filtered). Rebuild
+on the training machine if you want a fresh generation.
 
 ## Train
 

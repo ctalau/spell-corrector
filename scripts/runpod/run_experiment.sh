@@ -11,6 +11,11 @@ REPO_DIR="${REPO_DIR:-/workspace/spell-corrector}"
 TARGET_TRAIN="${TARGET_TRAIN:-4000000}"
 TARGET_VALID="${TARGET_VALID:-60000}"
 CONFIG="${CONFIG:-configs/train_full.yaml}"
+if [ -z "${PYTHON:-}" ] && [ -x /workspace/venv/bin/python ]; then
+  PYTHON=/workspace/venv/bin/python
+fi
+PYTHON="${PYTHON:-python}"
+export PYTHON
 cd "$REPO_DIR"
 export PYTHONPATH="$REPO_DIR"
 # Length bucketing makes batch memory vary a lot, which fragments the caching

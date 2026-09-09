@@ -77,6 +77,12 @@ export PYTHON
 
 status "setup"
 bash scripts/runpod/setup.sh || fail "setup"
+if [ -x /workspace/venv/bin/python ]; then
+    PYTHON=/workspace/venv/bin/python
+    export PYTHON
+    export PATH="/workspace/venv/bin:$PATH"
+fi
+echo "python now $PYTHON ($($PYTHON -V 2>&1))"
 
 status "checking CUDA"
 nvidia-smi || echo "nvidia-smi unavailable"

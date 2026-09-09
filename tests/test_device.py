@@ -48,15 +48,22 @@ def test_describe_cuda_empty_on_cpu() -> None:
     assert describe_cuda(torch.device("cpu")) == ""
 
 
-def test_setup_sh_installs_hunspell_into_python_and_requires_cuda() -> None:
+def test_setup_sh_installs_hunspell_into_venv_and_requires_cuda() -> None:
     text = (ROOT / "scripts/runpod/setup.sh").read_text()
-    assert '"$PYTHON" -m pip install' in text
+    assert "venv --system-site-packages" in text
+    assert "/workspace/venv" in text
     assert "hunspell==0.5.5" in text
     assert "--no-build-isolation" in text
-    assert "import hunspell" in text
-    assert 'die "import hunspell' in text
+    assert "sys.executable" in text
+    assert "sys.path" in text
+    assert "hunspell.__file__" in text
+    assert 'die "import hunspell"' in text
     assert "torch.cuda.is_available()" in text
-    assert 'die "CUDA not available"' in text
+    assert "CUDA is not available" in text
+    # Quiet pip hid a successful-looking install that the interpreter could
+    # not import; hunspell install output must be captured to a log.
+    assert "/tmp/hunspell-pip.log" in text
+    assert 'pip_install' in text or "tee" in text
 
 
 def test_run_experiment_sh_requires_cuda_before_data_build() -> None:
@@ -67,12 +74,13 @@ def test_run_experiment_sh_requires_cuda_before_data_build() -> None:
     assert cuda_at < data_at < train_at
 
 
-def test_bootstrap_sh_fails_status_when_cuda_missing() -> None:
+def test_bootstrap_sh_uses_venv_python_after_setup() -> None:
     text = (ROOT / "scripts/runpod/bootstrap.sh").read_text()
     setup_at = text.index("scripts/runpod/setup.sh")
+    venv_at = text.index("PYTHON=/workspace/venv/bin/python")
     cuda_at = text.index('fail "CUDA not available"')
     experiment_at = text.index("scripts/runpod/run_experiment.sh")
-    assert setup_at < cuda_at < experiment_at
+    assert setup_at < venv_at < cuda_at < experiment_at
 
 
 def test_preflight_and_train_do_not_silently_fall_back_to_cpu() -> None:

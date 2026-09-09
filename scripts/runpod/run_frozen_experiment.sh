@@ -38,7 +38,7 @@ print("device", torch.cuda.get_device_name(0), "bf16", torch.cuda.is_bf16_suppor
 PY
 
 log "frozen extras (transformers>=4.48,<5 so ModernBERT imports on torch 2.4)"
-"${PYTHON:-python}" -m pip install -q "transformers>=4.48,<5" tokenizers huggingface_hub accelerate \
+"${PYTHON:-python}" -m pip install -q "transformers>=4.48,<5" tokenizers huggingface_hub accelerate pytest-timeout \
   || die "transformers install"
 
 log "transformers / AutoModel import check"
@@ -60,8 +60,12 @@ assert ModernBertModel is not None
 print("AutoModel / ModernBertModel import ok")
 PY
 
-log "unit tests"
-"${PYTHON:-python}" -m pytest tests/ -q || die "unit tests"
+# Fast gate only: DummyTokenizer / DummyBackbone, no HF download, no CUDA extract,
+# no long overfit. Real-encoder smoke is cache_frozen_features.py --smoke-examples.
+# pytest-timeout kills a stuck test; timeout(1) kills a stuck pytest process.
+log "unit tests (fast, not slow; 120s/test, 600s wall)"
+timeout 600 "${PYTHON:-python}" -m pytest tests/ -q -m "not slow" \
+  --timeout=120 --timeout-method=signal || die "unit tests"
 
 log "building training data if needed (target ${TARGET_TRAIN} / ${TARGET_VALID})"
 if [ ! -f data/processed/train.parquet ] || [ ! -f data/processed/validation.parquet ]; then

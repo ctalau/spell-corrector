@@ -28,7 +28,7 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
-dev = ["pytest>=8.0"]
+dev = ["pytest>=8.0", "pytest-timeout>=2.3"]
 
 [tool.setuptools.packages.find]
 include = ["spelling_reranker*"]
@@ -36,3 +36,6 @@ include = ["spelling_reranker*"]
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 addopts = "-q"
+markers = [
+    "slow: HF ModernBERT download, CUDA extract, or long training — excluded on the frozen Runpod gate",
+]

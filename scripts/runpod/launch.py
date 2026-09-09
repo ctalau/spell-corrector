@@ -111,16 +111,25 @@ def main() -> int:
         # CMD in its own init script, which swallowed a start command passed
         # through dockerStartCmd and left the container crash-looping.
         #
-        # The command itself stays short and fetches bootstrap.sh from the
-        # branch under test, so the pod runs the same script that is in the
-        # repo rather than a copy embedded in the pod spec.
-        payload["dockerEntrypoint"] = [
-            "/bin/bash",
-            "-c",
-            f"curl -fsSL {bootstrap_url} -o /bootstrap.sh && exec bash /bootstrap.sh",
-        ]
+        # The command fetches bootstrap.sh from the branch under test, so the
+        # pod runs the script that is in the repo rather than a copy embedded
+        # in the pod spec.
+        #
+        # It stays small and defensive: it starts the progress server itself
+        # and never exits, so a failure inside the bootstrap shows up as a
+        # readable log instead of a crash-looping container with nothing
+        # listening.
+        entry = (
+            "mkdir -p /workspace/out; "
+            "(nohup python3 -m http.server 8000 --directory /workspace/out "
+            ">/dev/null 2>&1 &); "
+            f"curl -fsSL {bootstrap_url} -o /workspace/out/bootstrap.sh "
+            "&& bash /workspace/out/bootstrap.sh; "
+            "echo \"entrypoint: bootstrap exited rc=$?\" >> /workspace/out/run.log; "
+            "sleep infinity"
+        )
+        payload["dockerEntrypoint"] = ["/bin/bash", "-lc", entry]
         payload["dockerStartCmd"] = []
-    if not args.idle:
         print(f"bootstrap: {bootstrap_url}")
     print(f"creating pod over {gpus} (<= ${args.max_price}/hr)...")
     pod = api("/pods", "POST", payload)

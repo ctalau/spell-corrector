@@ -21,36 +21,36 @@ SAMPLER_PID=$!
 trap 'kill "$SAMPLER_PID" 2>/dev/null || true' EXIT
 
 log "unit tests"
-python -m pytest tests/ -q
+"${PYTHON:-python}" -m pytest tests/ -q
 
 log "typo generator calibration (public misspelling list)"
-python scripts/calibrate_typo_model.py
+"${PYTHON:-python}" scripts/calibrate_typo_model.py
 
 log "building training data (target ${TARGET_TRAIN})"
-python scripts/build_training_data.py \
+"${PYTHON:-python}" scripts/build_training_data.py \
   --target-train "$TARGET_TRAIN" \
   --target-valid "$TARGET_VALID" \
   --seed 1337
 
 log "sanity train (must reach a finite loss before the real run)"
-python scripts/train.py --config configs/train_sanity.yaml
+"${PYTHON:-python}" scripts/train.py --config configs/train_sanity.yaml
 
 log "full train"
-python scripts/train.py --config "$CONFIG"
+"${PYTHON:-python}" scripts/train.py --config "$CONFIG"
 
 log "downloading benchmark"
-python scripts/download_bea60k.py
+"${PYTHON:-python}" scripts/download_bea60k.py
 
 log "aspell baseline"
-python scripts/benchmark_aspell.py || true
+"${PYTHON:-python}" scripts/benchmark_aspell.py || true
 
 log "benchmark"
-python scripts/benchmark_bea60k.py \
+"${PYTHON:-python}" scripts/benchmark_bea60k.py \
   --model artifacts/model \
   --output reports/bea60k
 
 log "done"
-python - <<'PY'
+"${PYTHON:-python}" - <<'PY'
 import json
 from pathlib import Path
 res = json.loads(Path("reports/bea60k/results.json").read_text())

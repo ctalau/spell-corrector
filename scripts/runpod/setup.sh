@@ -26,16 +26,16 @@ log "apt + pip + data download in parallel"
 APT_PID=$!
 
 (
-  python -m pip install -q --upgrade pip
+  "${PYTHON:-python}" -m pip install -q --upgrade pip
   # Everything except torch (already in the image) and hunspell (needs libs
   # from the apt job, so it is installed after the wait below).
-  python -m pip install -q \
+  "${PYTHON:-python}" -m pip install -q \
     numpy pandas pyarrow tqdm pyyaml safetensors matplotlib requests pytest
 ) >/tmp/pip.log 2>&1 &
 PIP_PID=$!
 
 (
-  python scripts/download_sources.py
+  "${PYTHON:-python}" scripts/download_sources.py
 ) >/tmp/data.log 2>&1 &
 DATA_PID=$!
 
@@ -43,8 +43,8 @@ wait "$APT_PID" || { echo "apt failed:"; tail -30 /tmp/apt.log; exit 1; }
 log "apt done"
 
 # Needs libhunspell-dev from the apt job above.
-python -m pip install -q "setuptools<60" wheel
-python -m pip install -q --no-build-isolation hunspell==0.5.5
+"${PYTHON:-python}" -m pip install -q "setuptools<60" wheel
+"${PYTHON:-python}" -m pip install -q --no-build-isolation hunspell==0.5.5
 
 wait "$PIP_PID" || { echo "pip failed:"; tail -30 /tmp/pip.log; exit 1; }
 log "pip done"
@@ -53,7 +53,7 @@ wait "$DATA_PID" || { echo "source download failed:"; tail -30 /tmp/data.log; ex
 log "wikitext download done"
 
 log "verifying"
-python - <<'PY'
+"${PYTHON:-python}" - <<'PY'
 import torch
 from spelling_reranker.hunspell import default_engine
 from spelling_reranker.model import ByteSpellingReranker, count_parameters

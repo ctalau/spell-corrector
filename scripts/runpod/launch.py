@@ -83,7 +83,8 @@ def main() -> int:
     parser.add_argument("--idle", action="store_true", help="do not auto-run the experiment")
     args = parser.parse_args()
 
-    bootstrap = (Path(__file__).parent / "bootstrap.sh").read_text(encoding="utf-8")
+    raw_base = args.repo_url.replace("https://github.com/", "https://raw.githubusercontent.com/")
+    bootstrap_url = f"{raw_base}/{args.branch}/scripts/runpod/bootstrap.sh"
 
     gpus = args.gpu or GPU_PREFERENCE
     payload = {
@@ -106,9 +107,21 @@ def main() -> int:
         },
     }
     if not args.idle:
-        # Inline rather than fetched, so the pod runs exactly this working copy
-        # of the bootstrap even before the repo is cloned.
-        payload["dockerStartCmd"] = ["/bin/bash", "-c", bootstrap]
+        # Override the entrypoint, not just the command: the base image wraps
+        # CMD in its own init script, which swallowed a start command passed
+        # through dockerStartCmd and left the container crash-looping.
+        #
+        # The command itself stays short and fetches bootstrap.sh from the
+        # branch under test, so the pod runs the same script that is in the
+        # repo rather than a copy embedded in the pod spec.
+        payload["dockerEntrypoint"] = [
+            "/bin/bash",
+            "-c",
+            f"curl -fsSL {bootstrap_url} -o /bootstrap.sh && exec bash /bootstrap.sh",
+        ]
+        payload["dockerStartCmd"] = []
+    if not args.idle:
+        print(f"bootstrap: {bootstrap_url}")
     print(f"creating pod over {gpus} (<= ${args.max_price}/hr)...")
     pod = api("/pods", "POST", payload)
     pod_id = pod.get("id")

@@ -37,9 +37,28 @@ assert torch.cuda.is_available(), (
 print("device", torch.cuda.get_device_name(0), "bf16", torch.cuda.is_bf16_supported())
 PY
 
-log "frozen extras (transformers>=4.48, accelerate)"
-"${PYTHON:-python}" -m pip install -q "transformers>=4.48" tokenizers huggingface_hub accelerate \
+log "frozen extras (transformers>=4.48,<5 so ModernBERT imports on torch 2.4)"
+"${PYTHON:-python}" -m pip install -q "transformers>=4.48,<5" tokenizers huggingface_hub accelerate \
   || die "transformers install"
+
+log "transformers / AutoModel import check"
+"${PYTHON:-python}" - <<'PY' || die "transformers cannot import torch/AutoModel"
+import torch
+import transformers
+from transformers import AutoModel, AutoTokenizer
+from transformers.models.modernbert.modeling_modernbert import ModernBertModel
+
+print("torch", torch.__version__)
+print("transformers", transformers.__version__)
+major = int(transformers.__version__.split(".", 1)[0])
+assert major < 5, (
+    f"transformers 5.x requires PyTorch >= 2.5; this image has {torch.__version__}. "
+    "Pin transformers>=4.48,<5 (ModernBERT landed in 4.48)."
+)
+assert AutoModel is not None and AutoTokenizer is not None
+assert ModernBertModel is not None
+print("AutoModel / ModernBertModel import ok")
+PY
 
 log "unit tests"
 "${PYTHON:-python}" -m pytest tests/ -q || die "unit tests"

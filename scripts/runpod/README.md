@@ -14,17 +14,17 @@ Self-driving pods clone the repo, run `scripts/runpod/setup.sh`, then either
 `run_experiment.sh` (byte model) or `run_frozen_experiment.sh` when
 `--experiment frozen` / `--config configs/train_frozen_modernbert.yaml` is set.
 
-Frozen encoder launch (A5000-first, 100 GB disk, 200k-subset cache + H1/H2/H3):
+Frozen encoder: A5000-first, 100 GB disk, **cu124/py3.11** image so hunspell
+builds, then 200k-subset cache + H1/H2/H3. Do not pass the cu128/py3.12 torch
+2.8 image until hunspell works on 3.12.
 
 ```bash
 python scripts/runpod/launch.py \
   --experiment frozen \
-  --branch cursor/frozen-modernbert-selector-31a7 \
   --config configs/train_frozen_modernbert.yaml
 ```
 
-Pinned encoder: `answerdotai/ModernBERT-base` @ `8949b909ec900327062f0ebf497f51aef5e6f0c8`.
-Details: [reports/FROZEN_ENCODER.md](../../reports/FROZEN_ENCODER.md).
+See [reports/FROZEN_ENCODER.md](../../reports/FROZEN_ENCODER.md).
 
 ## Where the setup time went
 

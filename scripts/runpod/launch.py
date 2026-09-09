@@ -49,6 +49,10 @@ GPU_PREFERENCE = [
 
 #: Ships CUDA torch, so setup.sh never downloads a torch wheel.
 DEFAULT_IMAGE = "runpod/pytorch:1.0.2-cu1281-torch280-ubuntu2404"
+#: Frozen selector: Python 3.11 so hunspell==0.5.5 builds (setuptools<60), and
+#: transformers 4.48.x so ModernBERT imports on the image's torch 2.4.1.
+#: Do not use the cu128 / py3.12 / torch 2.8 image until hunspell works on 3.12.
+FROZEN_IMAGE = "runpod/pytorch:2.4.0-py3.11-cuda12.4.1-devel-ubuntu22.04"
 
 
 def api(path: str, method: str = "GET", payload: dict | None = None) -> dict | list:
@@ -70,7 +74,15 @@ def api(path: str, method: str = "GET", payload: dict | None = None) -> dict | l
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--name", default=None)
-    parser.add_argument("--image", default=DEFAULT_IMAGE)
+    parser.add_argument(
+        "--image",
+        default=None,
+        help=(
+            "Pod image. Frozen default is the cu124/py3.11 image "
+            "(hunspell + transformers 4.48). Do not pass the cu128/py3.12 "
+            "torch 2.8 image for frozen until hunspell builds on 3.12."
+        ),
+    )
     parser.add_argument("--disk-gb", type=int, default=None)
     parser.add_argument("--gpu", action="append", default=None, help="GPU type id (repeatable)")
     parser.add_argument("--max-price", type=float, default=None, help="USD/hr ceiling")
@@ -96,6 +108,15 @@ def main() -> int:
         args.experiment = "frozen"
 
     frozen = args.experiment == "frozen"
+    if args.image is None:
+        args.image = FROZEN_IMAGE if frozen else DEFAULT_IMAGE
+    elif frozen and ("torch280" in args.image or "py3.12" in args.image or "ubuntu2404" in args.image):
+        print(
+            "warning: cu128/py3.12 images cannot build hunspell==0.5.5 "
+            "(setuptools<60 / ImpImporter). Frozen runs need "
+            f"{FROZEN_IMAGE}",
+            file=sys.stderr,
+        )
     if args.name is None:
         args.name = "spell-corrector-frozen" if frozen else "spell-corrector-train"
     if args.disk_gb is None:
@@ -195,6 +216,7 @@ def main() -> int:
         print(f"commit:    {commit}")
         print(f"bootstrap: {bootstrap_url}")
         print(f"experiment:{args.experiment} config={args.config}")
+        print(f"image:     {args.image}")
     print(f"creating pod over {gpus} (<= ${args.max_price}/hr)...")
     pod = api("/pods", "POST", payload)
     pod_id = pod.get("id")

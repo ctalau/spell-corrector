@@ -21,7 +21,7 @@ dependencies = [
     "matplotlib>=3.8",
     "requests>=2.31",
     "hunspell>=0.5.5",
-    "transformers>=4.48",
+    "transformers>=4.48,<5",
     "tokenizers",
     "huggingface_hub",
     "accelerate",

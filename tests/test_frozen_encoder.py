@@ -505,3 +505,18 @@ def test_dummy_cache_and_head_train_smoke(tmp_path) -> None:
     )
     assert other["key_sha256"] != key_a
 
+
+def test_frozen_pins_transformers_4x_and_cu124_py311_image():
+    """Regression: transformers 5.x needs torch>=2.5; hunspell 0.5.5 needs py3.11."""
+    pin = "transformers>=4.48,<5"
+    pyproject = (ROOT / "pyproject.toml").read_text()
+    assert f'"{pin}"' in pyproject
+    setup = (ROOT / "scripts/runpod/setup.sh").read_text()
+    assert f'"{pin}"' in setup
+    assert "skip setuptools<60" in setup
+    frozen_sh = (ROOT / "scripts/runpod/run_frozen_experiment.sh").read_text()
+    assert f'"{pin}"' in frozen_sh
+    assert "cannot import torch/AutoModel" in frozen_sh
+    launch = (ROOT / "scripts/runpod/launch.py").read_text()
+    assert 'FROZEN_IMAGE = "runpod/pytorch:2.4.0-py3.11-cuda12.4.1-devel-ubuntu22.04"' in launch
+

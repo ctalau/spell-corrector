@@ -18,7 +18,9 @@
 #     dist-packages). pip exits 0; `import hunspell` still fails.
 # The venv is created with --system-site-packages so image torch/CUDA stay
 # visible. hunspell==0.5.5 still uses distutils; on Python 3.11 pin
-# setuptools<60 and disable build isolation.
+# setuptools<60 and disable build isolation. On 3.12+ that pin fails
+# (pkgutil.ImpImporter / no distutils); skip it, try apt python3-hunspell,
+# and die naming the py3.11 cu124 image if import still fails.
 set -uo pipefail
 
 REPO_DIR="${REPO_DIR:-/workspace/spell-corrector}"
@@ -118,12 +120,29 @@ pip_install /tmp/pip-upgrade.log --upgrade pip || die "pip upgrade"
 # Everything except torch, which the image already provides.
 pip_install /tmp/pip-deps.log \
   numpy pandas pyarrow tqdm pyyaml safetensors matplotlib requests pytest \
-  "transformers>=4.48" tokenizers huggingface_hub accelerate \
+  "transformers>=4.48,<5" tokenizers huggingface_hub accelerate \
   || die "pip deps"
-pip_install /tmp/pip-build.log "setuptools<60" wheel cython || die "pip build deps"
-pip_install /tmp/hunspell-pip.log --no-build-isolation --force-reinstall hunspell==0.5.5 \
-  || die "hunspell pip install into ${PYTHON}"
-"$PYTHON" -m pip show hunspell || die "pip show hunspell"
+
+PY312="$("$PYTHON" -c 'import sys; print("1" if sys.version_info >= (3, 12) else "0")')"
+if [ "$PY312" = "1" ]; then
+  # hunspell==0.5.5 still uses distutils. setuptools<60 restores that on
+  # 3.11 but has no distutils to patch on 3.12 (ImpImporter / BackendUnavailable).
+  log "Python 3.12+: skip setuptools<60; try distro python3-hunspell"
+  apt-get install -y -qq --no-install-recommends python3-hunspell \
+    || echo "apt python3-hunspell unavailable"
+  if ! "$PYTHON" - <<'PY'
+import hunspell
+print("hunspell", hunspell.__file__)
+PY
+  then
+    die "hunspell==0.5.5 cannot build on Python 3.12 (setuptools<60 / ImpImporter). Use runpod/pytorch:2.4.0-py3.11-cuda12.4.1-devel-ubuntu22.04. The cu128/py3.12 torch 2.8 image is not supported until hunspell is fixed."
+  fi
+else
+  pip_install /tmp/pip-build.log "setuptools<60" wheel cython || die "pip build deps"
+  pip_install /tmp/hunspell-pip.log --no-build-isolation --force-reinstall hunspell==0.5.5 \
+    || die "hunspell pip install into ${PYTHON}"
+  "$PYTHON" -m pip show hunspell || die "pip show hunspell"
+fi
 
 log "hunspell import check"
 "$PYTHON" - <<'PY' || die "import hunspell"

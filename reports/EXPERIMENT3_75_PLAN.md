@@ -1,5 +1,7 @@
 # Experiment 3: reach 75% overall correction accuracy
 
+> Update 2026-09-09: the next run is the [frozen ModernBERT + selector pilot on a 24 GB pod](FROZEN_ENCODER_PLAN.md). It supersedes this plan's E1–E6 execution queue and L40S budget for the immediate experiment. The evaluation safeguards below remain applicable.
+
 Status: execution plan; no new training or accuracy result is claimed here.
 Based on repository commit `1047c53bb3c1ae27c48d96c17b22ab3516b969e8`.
 

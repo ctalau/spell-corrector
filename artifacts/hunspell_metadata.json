@@ -1,27 +1,15 @@
 {
-  "dictionary_hashes": {
-    "en_US.aff": {
-      "path": "/usr/share/hunspell/en_US.aff",
-      "sha256": "70fe5778717d097ce2f3326baaa5c1e4d2206d81a5a81d3ea8e11c4770806dd5",
-      "size": 3131
-    },
-    "en_US.dic": {
-      "path": "/usr/share/hunspell/en_US.dic",
+  "hunspell_version": "@(#) International Ispell Version 3.2.06 (but really Hunspell 1.7.2)",
+  "aspell_version": "@(#) International Ispell Version 3.1.20 (but really Aspell 0.60.8.1)",
+  "dictionary_files": {
+    "/usr/share/hunspell/en_US.dic": {
       "sha256": "829a043cf078d1e80e886289a13823454977f442a239a859d2133ea61944aa60",
       "size": 860381
+    },
+    "/usr/share/hunspell/en_US.aff": {
+      "sha256": "70fe5778717d097ce2f3326baaa5c1e4d2206d81a5a81d3ea8e11c4770806dd5",
+      "size": 3131
     }
   },
-  "dictionary_package": "hunspell-en-us",
-  "dictionary_paths": {
-    "aff": "/usr/share/hunspell/en_US.aff",
-    "dic": "/usr/share/hunspell/en_US.dic"
-  },
-  "hunspell_cli_version": "@(#) International Ispell Version 3.2.06 (but really Hunspell 1.7.2)",
-  "os": {
-    "platform": "Linux-6.12.94+-x86_64-with-glibc2.39",
-    "python": "3.12.3",
-    "release": "6.12.94+",
-    "system": "Linux"
-  },
-  "python_binding": "/workspace/.venv/lib/python3.12/site-packages/hunspell.cpython-312-x86_64-linux-gnu.so"
+  "packages": "aspell\t0.60.8.1-1build1\naspell-en\t2020.12.07-0-1\nhunspell\t1.7.2+really1.7.2-10build3\nhunspell-en-us\t1:2020.12.07-2\nlibhunspell-dev:amd64\t1.7.2+really1.7.2-10build3"
 }

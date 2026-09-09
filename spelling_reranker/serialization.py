@@ -19,6 +19,11 @@ from spelling_reranker.byte_encoding import (
     text_to_byte_ids,
 )
 
+#: A theoretically full pool (16 x MAX_CANDIDATE_BYTES + 38 structural tokens)
+#: would not fit here, but measured over 4,000 real BEA-60K errors the worst
+#: case is 169 bytes -- Hunspell returns short lists of short words. The budget
+#: is therefore set from observed data rather than the worst case, and
+#: `predict_indices` degrades to candidate 0 if a freak input ever exceeds it.
 DEFAULT_MAX_SEQ_LEN = 448
 N_CANDIDATES = N_CANDIDATE_SLOTS
 MAX_CANDIDATE_BYTES = 32

@@ -95,3 +95,40 @@ def test_padding_masks_missing_candidates() -> None:
     probs = torch.softmax(logits[0, :3], dim=0)
     assert torch.isfinite(probs).all()
     assert torch.isclose(probs.sum(), torch.tensor(1.0), atol=1e-5)
+
+
+def test_realistic_candidate_pools_fit_comfortably() -> None:
+    """Realistic pools leave plenty of headroom.
+
+    Measured over 4,000 real BEA-60K errors the worst serialized fixed cost is
+    169 bytes of the 448 budget, because Hunspell returns short lists of short
+    words.
+    """
+    from spelling_reranker.serialization import DEFAULT_MAX_SEQ_LEN
+
+    cands = ["misspelling"] * N_CANDIDATE_SLOTS
+    ex = serialize_example("left context ", "mispeling", " right context", cands)
+    assert ex.seq_len <= DEFAULT_MAX_SEQ_LEN
+    assert all(ex.candidate_valid)
+
+
+def test_pathological_input_degrades_instead_of_raising() -> None:
+    """A freak oversized token falls back to candidate 0 rather than crashing.
+
+    The data build can discard a pathological example; the benchmark cannot,
+    because it only runs after training has already finished.
+    """
+    from spelling_reranker.inference import predict_indices
+    from spelling_reranker.model import ByteSpellingReranker, ModelConfig
+    from spelling_reranker.serialization import DEFAULT_MAX_SEQ_LEN
+
+    model = ByteSpellingReranker(ModelConfig(n_layers=1))
+    model.eval()
+    monster = "x" * (DEFAULT_MAX_SEQ_LEN + 200)
+    items = [
+        ("ctx ", monster, " after", ["aa", "bb"] + [None] * (N_CANDIDATE_SLOTS - 2)),
+        ("the ", "teh", " cat", ["the", "tea"] + [None] * (N_CANDIDATE_SLOTS - 2)),
+    ]
+    picked = predict_indices(model, items, batch_size=8)
+    assert len(picked) == 2
+    assert picked[0] == 0

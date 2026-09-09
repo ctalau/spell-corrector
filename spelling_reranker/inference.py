@@ -77,3 +77,38 @@ def predict_word(
     if idx < 0 or idx >= len(candidates):
         return None
     return candidates[idx]
+
+
+@torch.no_grad()
+def predict_indices(
+    model: ByteSpellingReranker,
+    items: list[tuple[str, str, str, list[str | None]]],
+    *,
+    device: torch.device | None = None,
+    batch_size: int = 128,
+) -> list[int]:
+    """Batched form of `predict_index`.
+
+    `items` are (context_before, typo, context_after, candidates) tuples. The
+    benchmark scores tens of thousands of errors, and one forward pass each
+    leaves the GPU almost idle.
+    """
+    device = device or next(model.parameters()).device
+    out: list[int] = []
+    for start in range(0, len(items), batch_size):
+        chunk = items[start : start + batch_size]
+        serialized = [
+            serialize_example(before, typo, after, cands, max_seq_len=model.cfg.max_seq_len)
+            for before, typo, after, cands in chunk
+        ]
+        batch = collate_examples(serialized)
+        batch = {k: v.to(device) for k, v in batch.items() if k != "gold_index"}
+        logits = model(
+            batch["token_ids"],
+            batch["attention_mask"],
+            batch["typo_mask"],
+            batch["candidate_masks"],
+            batch["candidate_valid"],
+        )
+        out.extend(int(i) for i in logits.argmax(dim=-1).tolist())
+    return out

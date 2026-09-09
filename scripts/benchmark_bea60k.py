@@ -19,7 +19,7 @@ from spelling_reranker.aspell import AspellEngine, aspell_metadata
 from spelling_reranker.byte_encoding import N_CANDIDATE_SLOTS, nfc
 from spelling_reranker.candidates import build_pool, pad_pool
 from spelling_reranker.hunspell import default_engine
-from spelling_reranker.inference import load_model_dir, predict_index
+from spelling_reranker.inference import load_model_dir, predict_indices
 from spelling_reranker.serialization import MAX_CANDIDATE_BYTES
 
 
@@ -129,6 +129,7 @@ def main() -> int:
     parser.add_argument("--output", type=Path, default=ROOT / "reports" / "bea60k")
     parser.add_argument("--device", default=None)
     parser.add_argument("--max-examples", type=int, default=None)
+    parser.add_argument("--batch-size", type=int, default=256)
     parser.add_argument("--skip-aspell", action="store_true")
     args = parser.parse_args()
 
@@ -139,10 +140,22 @@ def main() -> int:
     if args.max_examples is not None:
         errors = errors[: args.max_examples]
     n = len(errors)
-    print(f"extracted {n} word-level errors from {len(pairs)} sentence pairs")
+    print(f"extracted {n} word-level errors from {len(pairs)} sentence pairs", flush=True)
 
     hunspell = default_engine()
-    aspell = None if args.skip_aspell else AspellEngine()
+    # BEA repeats many misspellings and suggest() is the slowest step in the
+    # sweep, so memoise it on the typo string.
+    sugg_cache: dict[str, tuple[bool, tuple[str, ...]]] = {}
+
+    def hunspell_lookup(word: str) -> tuple[bool, list[str]]:
+        hit = sugg_cache.get(word)
+        if hit is None:
+            flagged = not hunspell.spell(word)
+            suggestions = tuple(hunspell.suggest(word)) if flagged else ()
+            hit = (flagged, suggestions)
+            sugg_cache[word] = hit
+        return hit[0], list(hit[1])
+
     model = None
     device = None
     if args.model is not None and Path(args.model).exists():
@@ -151,143 +164,170 @@ def main() -> int:
         device = torch.device(args.device or ("cuda" if torch.cuda.is_available() else "cpu"))
         model = load_model_dir(args.model, device=device)
 
+    # ---- phase 1: Hunspell over every error ----------------------------------
     hist: Counter[str] = Counter()
     hunspell_detect = 0
     hunspell_top1 = 0
-    hunspell_oracle10 = 0
+    hunspell_oracle_slots = 0
     hunspell_oracle_at_10_legacy = 0
+    records: list[dict] = []
+    scored: list[int] = []
+
+    print("phase 1: Hunspell", flush=True)
+    for err in errors:
+        typo, gold = err["typo"], err["gold"]
+        flagged, suggestions = hunspell_lookup(typo)
+        pool = build_pool(suggestions, limit=N_CANDIDATE_SLOTS, max_bytes=MAX_CANDIDATE_BYTES)
+        hist[classify_gold_position(flagged, suggestions, gold)] += 1
+        if flagged:
+            hunspell_detect += 1
+        gold_n = nfc(gold)
+        in_pool = any(nfc(c) == gold_n for c in pool)
+        hunspell0_ok = bool(pool) and nfc(pool[0]) == gold_n
+        if hunspell0_ok:
+            hunspell_top1 += 1
+        if in_pool:
+            hunspell_oracle_slots += 1
+        if any(nfc(c) == gold_n for c in suggestions[:10]):
+            hunspell_oracle_at_10_legacy += 1
+        record = {
+            **err,
+            "hunspell_flagged": flagged,
+            "hunspell_suggestions": suggestions,
+            "gold_bucket": classify_gold_position(flagged, suggestions, gold),
+            "hunspell_top1_ok": hunspell0_ok,
+            "pool": pool,
+            "in_top10": in_pool,
+            "gold_n": gold_n,
+        }
+        if model is not None and in_pool:
+            scored.append(len(records))
+        records.append(record)
+
+    # ---- phase 2: Aspell baseline -------------------------------------------
+    aspell_top1 = 0
+    aspell_meta = None
+    if not args.skip_aspell:
+        print("phase 2: Aspell baseline", flush=True)
+        aspell = AspellEngine()
+        aspell_meta = aspell_metadata()
+        aspell_cache: dict[str, str | None] = {}
+        try:
+            for record in records:
+                typo = record["typo"]
+                if typo not in aspell_cache:
+                    aspell_cache[typo] = aspell.top1(typo)
+                top1 = aspell_cache[typo]
+                ok = top1 is not None and nfc(top1) == record["gold_n"]
+                record["aspell_top1_ok"] = ok
+                if ok:
+                    aspell_top1 += 1
+        finally:
+            aspell.close()
+    else:
+        for record in records:
+            record["aspell_top1_ok"] = False
+
+    # ---- phase 3: model, batched --------------------------------------------
+    if model is not None and scored:
+        print(f"phase 3: model over {len(scored)} solvable errors", flush=True)
+        items = [
+            (
+                records[i]["context_before"],
+                records[i]["typo"],
+                records[i]["context_after"],
+                pad_pool(records[i]["pool"], N_CANDIDATE_SLOTS),
+            )
+            for i in scored
+        ]
+        indices = predict_indices(model, items, device=device, batch_size=args.batch_size)
+        for i, idx in zip(scored, indices):
+            record = records[i]
+            record["model_index"] = idx
+            if 0 <= idx < len(record["pool"]):
+                record["model_word"] = record["pool"][idx]
+                record["model_ok"] = nfc(record["model_word"]) == record["gold_n"]
+
+    # ---- tally ---------------------------------------------------------------
     model_overall = 0
     model_conditional_n = 0
     model_conditional_ok = 0
     hunspell_cond_top1 = 0
-    aspell_top1 = 0
     movement: Counter[tuple[int, int]] = Counter()
-    samples = {k: [] for k in ("fixed_top1", "damaged_top1", "both_failed", "gold_outside_top10", "context_sensitive")}
+    samples: dict[str, list[dict]] = {
+        k: [] for k in ("fixed_top1", "damaged_top1", "both_failed", "gold_outside_top10")
+    }
 
-    pred_path = args.output
-    pred_path.mkdir(parents=True, exist_ok=True)
-    pred_f = (pred_path / "predictions.jsonl").open("w", encoding="utf-8")
-
-    try:
-        for err in errors:
-            typo, gold = err["typo"], err["gold"]
-            flagged = not hunspell.spell(typo)
-            suggestions = hunspell.suggest(typo)
-            top10 = build_pool(
-                suggestions, limit=N_CANDIDATE_SLOTS, max_bytes=MAX_CANDIDATE_BYTES
-            )
-            bucket = classify_gold_position(flagged, suggestions, gold)
-            hist[bucket] += 1
-            if flagged:
-                hunspell_detect += 1
-            gold_n = nfc(gold)
-            in_top10 = any(nfc(c) == gold_n for c in top10)
-            hunspell0_ok = bool(top10) and nfc(top10[0]) == gold_n
-            if hunspell0_ok:
-                hunspell_top1 += 1
-            if in_top10:
-                hunspell_oracle10 += 1
-            if any(nfc(c) == gold_n for c in suggestions[:10]):
-                hunspell_oracle_at_10_legacy += 1
-
-            aspell_ok = False
-            if aspell is not None:
-                a0 = aspell.top1(typo)
-                aspell_ok = a0 is not None and nfc(a0) == gold_n
-                if aspell_ok:
-                    aspell_top1 += 1
-
-            model_idx = None
-            model_word = None
-            model_ok = False
-            if model is not None and in_top10:
-                padded: list[str | None] = pad_pool(top10, N_CANDIDATE_SLOTS)
-                model_idx = predict_index(
-                    model,
-                    err["context_before"],
-                    typo,
-                    err["context_after"],
-                    padded,
-                    device=device,
-                )
-                if 0 <= model_idx < len(top10):
-                    model_word = top10[model_idx]
-                    model_ok = nfc(model_word) == gold_n
+    args.output.mkdir(parents=True, exist_ok=True)
+    with (args.output / "predictions.jsonl").open("w", encoding="utf-8") as pred_f:
+        for record in records:
+            record.setdefault("model_index", None)
+            record.setdefault("model_word", None)
+            record.setdefault("model_ok", False)
+            pool = record["pool"]
+            gold_n = record["gold_n"]
             if model is not None:
-                if in_top10:
+                if record["in_top10"]:
                     model_conditional_n += 1
-                    if model_ok:
+                    if record["model_ok"]:
                         model_conditional_ok += 1
                         model_overall += 1
-                    gold_idx = next(i for i, c in enumerate(top10) if nfc(c) == gold_n)
-                    if hunspell0_ok:
+                    if record["hunspell_top1_ok"]:
                         hunspell_cond_top1 += 1
-                    if model_idx is not None:
-                        movement[(gold_idx, model_idx)] += 1
-                    if model_ok and not hunspell0_ok and len(samples["fixed_top1"]) < 50:
-                        samples["fixed_top1"].append(err | {"model": model_word, "hunspell0": top10[0] if top10 else None})
-                    if (not model_ok) and hunspell0_ok and len(samples["damaged_top1"]) < 50:
-                        samples["damaged_top1"].append(err | {"model": model_word, "hunspell0": top10[0]})
-                    if (not model_ok) and (not hunspell0_ok) and len(samples["both_failed"]) < 50:
-                        samples["both_failed"].append(err | {"top10": top10, "model": model_word})
-                else:
-                    if len(samples["gold_outside_top10"]) < 50:
-                        samples["gold_outside_top10"].append(err | {"suggestions": suggestions[:15]})
-
-            rec = {
-                **err,
-                "hunspell_flagged": flagged,
-                "hunspell_suggestions": suggestions,
-                "gold_bucket": bucket,
-                "hunspell_top1_ok": hunspell0_ok,
-                "in_top10": in_top10,
-                "aspell_top1_ok": aspell_ok,
-                "model_index": model_idx,
-                "model_word": model_word,
-                "model_ok": model_ok,
-            }
-            pred_f.write(json.dumps(rec, ensure_ascii=False) + "\n")
-    finally:
-        pred_f.close()
-        if aspell is not None:
-            aspell.close()
+                    gold_idx = next(i for i, c in enumerate(pool) if nfc(c) == gold_n)
+                    if record["model_index"] is not None:
+                        movement[(gold_idx, int(record["model_index"]))] += 1
+                    if record["model_ok"] and not record["hunspell_top1_ok"] and len(samples["fixed_top1"]) < 50:
+                        samples["fixed_top1"].append(record)
+                    elif not record["model_ok"] and record["hunspell_top1_ok"] and len(samples["damaged_top1"]) < 50:
+                        samples["damaged_top1"].append(record)
+                    elif not record["model_ok"] and not record["hunspell_top1_ok"] and len(samples["both_failed"]) < 50:
+                        samples["both_failed"].append(record)
+                elif len(samples["gold_outside_top10"]) < 50:
+                    samples["gold_outside_top10"].append(record)
+            out = {k: v for k, v in record.items() if k != "gold_n"}
+            pred_f.write(json.dumps(out, ensure_ascii=False) + "\n")
 
     write_histogram(hist, n, args.output)
 
-    overall_model = model_overall / n if n else 0.0
     results = {
         "n_sentence_pairs": len(pairs),
         "n_word_errors": n,
+        "n_candidate_slots": N_CANDIDATE_SLOTS,
         "hunspell_detection_rate": hunspell_detect / n if n else 0.0,
         "hunspell_top1": hunspell_top1 / n if n else 0.0,
-        "n_candidate_slots": N_CANDIDATE_SLOTS,
-        "hunspell_oracle_at_slots": hunspell_oracle10 / n if n else 0.0,
+        "hunspell_oracle_at_slots": hunspell_oracle_slots / n if n else 0.0,
         "hunspell_oracle_at_10": hunspell_oracle_at_10_legacy / n if n else 0.0,
-        "model_overall_success": overall_model if model is not None else None,
+        "model_overall_success": (model_overall / n) if model is not None and n else None,
         "model_conditional_accuracy": (
-            model_conditional_ok / model_conditional_n if model is not None and model_conditional_n else None
+            model_conditional_ok / model_conditional_n
+            if model is not None and model_conditional_n
+            else None
         ),
         "hunspell_top1_conditional": (
-            hunspell_cond_top1 / model_conditional_n if model is not None and model_conditional_n else None
+            hunspell_cond_top1 / model_conditional_n
+            if model is not None and model_conditional_n
+            else None
         ),
-        "aspell_top1": aspell_top1 / n if n and aspell is not None else None,
-        "aspell_metadata": None if args.skip_aspell else aspell_metadata(),
+        "aspell_top1": (aspell_top1 / n) if n and not args.skip_aspell else None,
+        "aspell_metadata": aspell_meta,
         "hunspell_metadata": hunspell.metadata(),
         "model_path": str(args.model) if args.model else None,
         "gold_index_histogram": dict(hist),
         "movement_matrix": {f"{a}->{b}": c for (a, b), c in movement.items()},
     }
     if results["aspell_top1"] is not None and results["model_overall_success"] is not None:
-        delta = 100.0 * (results["model_overall_success"] - results["aspell_top1"])
         results["beat_aspell"] = results["model_overall_success"] > results["aspell_top1"]
-        results["aspell_delta_pp"] = delta
+        results["aspell_delta_pp"] = 100.0 * (
+            results["model_overall_success"] - results["aspell_top1"]
+        )
     (args.output / "results.json").write_text(json.dumps(results, indent=2) + "\n", encoding="utf-8")
     for name, rows in samples.items():
         (args.output / f"examples_{name}.jsonl").write_text(
-            "".join(json.dumps(r, ensure_ascii=False) + "\n" for r in rows),
+            "".join(json.dumps({k: v for k, v in r.items() if k != "gold_n"}, ensure_ascii=False) + "\n" for r in rows),
             encoding="utf-8",
         )
-    print(json.dumps(results, indent=2))
+    print(json.dumps({k: v for k, v in results.items() if k != "movement_matrix"}, indent=2))
     return 0
 
 

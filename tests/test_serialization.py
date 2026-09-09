@@ -8,6 +8,7 @@ from spelling_reranker.byte_encoding import (
     CAND_END_ID,
     CAND_IDS,
     CLS_ID,
+    N_CANDIDATE_SLOTS,
     TYPO_END_ID,
     TYPO_START_ID,
     byte_ids_to_text,
@@ -21,7 +22,7 @@ from spelling_reranker.serialization import (
 from spelling_reranker.dataset import collate_examples
 
 
-def _example(n_cands: int = 10):
+def _example(n_cands: int = N_CANDIDATE_SLOTS):
     cands = [f"cand{i}" for i in range(n_cands)]
     return serialize_example(
         "The left ",
@@ -74,8 +75,8 @@ def test_gold_index_points_to_exact_candidate() -> None:
 def test_padding_masks_missing_candidates() -> None:
     cands = ["the", "eh", "tech"]
     ex = serialize_example("See ", "teh", ".", cands, gold_index=0)
-    assert ex.candidate_valid == [True, True, True, False, False, False, False, False, False, False]
-    for i in range(3, 10):
+    assert ex.candidate_valid == [True, True, True] + [False] * (N_CANDIDATE_SLOTS - 3)
+    for i in range(3, N_CANDIDATE_SLOTS):
         assert ex.candidate_positions[i] == []
 
     model = ByteSpellingReranker(ModelConfig(n_layers=1, max_seq_len=64))
@@ -89,7 +90,7 @@ def test_padding_masks_missing_candidates() -> None:
             batch["candidate_masks"],
             batch["candidate_valid"],
         )
-    assert logits.shape == (1, 10)
+    assert logits.shape == (1, N_CANDIDATE_SLOTS)
     assert torch.isneginf(logits[0, 3:]).all() or (logits[0, 3:] <= torch.finfo(logits.dtype).min / 2).all()
     probs = torch.softmax(logits[0, :3], dim=0)
     assert torch.isfinite(probs).all()

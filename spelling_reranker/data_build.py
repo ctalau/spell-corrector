@@ -349,7 +349,7 @@ def _noise_context(
     return changed
 
 
-def generate_examples(
+def iter_examples(
     sentences: Iterable[tuple[str, str]] | Callable[[], Iterable[tuple[str, str]]],
     typo_table: dict[str, list[tuple[str, str, int, str]]],
     *,
@@ -360,11 +360,12 @@ def generate_examples(
     context_noise_prob: float = 0.25,
     max_noise_words: int = 2,
     gold0_fraction: float = 0.65,
-    max_uses_per_typo: int = 6,
+    max_uses_per_typo: int = 8,
     max_passes: int = 3,
     show_progress: bool = True,
-) -> tuple[list[dict], BuildStats]:
-    """Instantiate up to `target` examples by dropping table typos into sentences.
+    stats: BuildStats | None = None,
+) -> Iterator[dict]:
+    """Yield up to `target` examples by dropping table typos into sentences.
 
     `sentences` may be an iterable or a callable returning a fresh one. The
     corpus holds a finite number of usable sentences, so when `target` exceeds
@@ -372,9 +373,9 @@ def generate_examples(
     pass draws a different target word and typo, so a revisited sentence yields
     a different example rather than a duplicate.
     """
+    stats = stats if stats is not None else BuildStats()
     rng = np.random.default_rng(seed)
-    stats = BuildStats()
-    rows: list[dict] = []
+    rows_emitted = 0
     uses: Counter[tuple[str, str]] = Counter()
     emitted: set[tuple[str, str, str]] = set()
     gold0_budget = int(target * gold0_fraction)
@@ -389,10 +390,10 @@ def generate_examples(
             yield sentences
 
     for stream in _streams():
-        if len(rows) >= target:
+        if rows_emitted >= target:
             break
         for document_id, sentence in stream:
-            if len(rows) >= target:
+            if rows_emitted >= target:
                 break
             tokens = sentence.split()
             eligible = [i for i, tok in enumerate(tokens) if tok in typo_table]
@@ -478,10 +479,22 @@ def generate_examples(
             }
             for i in range(N_CANDIDATES):
                 row[f"cand_{i}"] = padded[i]
-            rows.append(row)
+            rows_emitted += 1
             progress.update(1)
+            yield row
 
     progress.close()
+
+
+def generate_examples(*args, **kwargs) -> tuple[list[dict], BuildStats]:
+    """List-returning wrapper around `iter_examples`.
+
+    Convenient for tests and small builds. Large builds should consume
+    `iter_examples` directly and stream to parquet -- holding several million
+    row dicts in memory costs multiple gigabytes.
+    """
+    stats = kwargs.pop("stats", None) or BuildStats()
+    rows = list(iter_examples(*args, stats=stats, **kwargs))
     return rows, stats
 
 
@@ -509,9 +522,56 @@ def rows_to_frame(rows: list[dict]) -> pd.DataFrame:
     return frame
 
 
-def write_processed(
-    train_rows: list[dict],
-    valid_rows: list[dict],
+def write_split(
+    rows: Iterator[dict],
+    path: Path,
+    *,
+    chunk_size: int = 200_000,
+) -> int:
+    """Stream example dicts to a parquet file in row-group chunks.
+
+    Buffering several million row dicts before writing costs multiple GiB; this
+    keeps peak memory at roughly one chunk.
+    """
+    import pyarrow as pa
+    import pyarrow.parquet as pq
+
+    path.parent.mkdir(parents=True, exist_ok=True)
+    writer: "pq.ParquetWriter | None" = None
+    buffer: list[dict] = []
+    total = 0
+
+    def _flush() -> None:
+        nonlocal writer, buffer, total
+        if not buffer:
+            return
+        table = pa.Table.from_pandas(rows_to_frame(buffer), preserve_index=False)
+        if writer is None:
+            writer = pq.ParquetWriter(str(path), table.schema)
+        writer.write_table(table)
+        total += len(buffer)
+        buffer = []
+
+    try:
+        for row in rows:
+            buffer.append(row)
+            if len(buffer) >= chunk_size:
+                _flush()
+        _flush()
+        if writer is None:
+            # Nothing generated: still emit a valid empty file with the schema.
+            table = pa.Table.from_pandas(rows_to_frame([]), preserve_index=False)
+            writer = pq.ParquetWriter(str(path), table.schema)
+            writer.write_table(table)
+    finally:
+        if writer is not None:
+            writer.close()
+    return total
+
+
+def write_manifest(
+    n_train: int,
+    n_valid: int,
     *,
     out_dir: Path,
     seed: int,
@@ -524,8 +584,6 @@ def write_processed(
     out_dir.mkdir(parents=True, exist_ok=True)
     train_path = out_dir / "train.parquet"
     valid_path = out_dir / "validation.parquet"
-    rows_to_frame(train_rows).to_parquet(train_path, index=False)
-    rows_to_frame(valid_rows).to_parquet(valid_path, index=False)
 
     def _file_hash(path: Path) -> str:
         digest = hashlib.sha256()
@@ -538,8 +596,8 @@ def write_processed(
         "seed": seed,
         "elapsed_sec": elapsed_sec,
         "n_candidate_slots": N_CANDIDATES,
-        "train": {"n": len(train_rows), **train_stats.as_dict()},
-        "validation": {"n": len(valid_rows), **valid_stats.as_dict()},
+        "train": {"n": n_train, **train_stats.as_dict()},
+        "validation": {"n": n_valid, **valid_stats.as_dict()},
         "source": source_meta,
         "created_unix": int(time.time()),
         **(extra or {}),
@@ -549,13 +607,13 @@ def write_processed(
         "files": {
             "train": {
                 "path": "data/processed/train.parquet",
-                "n": len(train_rows),
+                "n": n_train,
                 "sha256": _file_hash(train_path),
                 "bytes": train_path.stat().st_size,
             },
             "validation": {
                 "path": "data/processed/validation.parquet",
-                "n": len(valid_rows),
+                "n": n_valid,
                 "sha256": _file_hash(valid_path),
                 "bytes": valid_path.stat().st_size,
             },

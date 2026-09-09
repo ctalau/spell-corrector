@@ -59,12 +59,20 @@ pip install torch --index-url https://download.pytorch.org/whl/cu124
 pip install -e ".[dev]"
 ```
 
-`hunspell==0.5.5` does not build against setuptools >= 60 (it fails with
-`AttributeError: install_layout`). Install it as:
+The `hunspell` binding builds from source and fails against setuptools >= 60
+(`AttributeError: install_layout`). On Python 3.11 and older:
 
 ```bash
 pip install "setuptools<60" wheel
 pip install --no-build-isolation hunspell==0.5.5
+```
+
+On Python 3.12 that workaround does not apply — there is no `distutils` for old
+setuptools to patch — so use the distro package, which is the same version
+already compiled for the interpreter:
+
+```bash
+sudo apt-get install -y python3-hunspell
 ```
 
 Confirm Hunspell:

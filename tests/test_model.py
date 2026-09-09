@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
+import pytest
 import torch
 
 from spelling_reranker.byte_encoding import N_CANDIDATE_SLOTS
@@ -86,3 +87,27 @@ def test_cross_entropy_forward_backward() -> None:
     grads = [p.grad for p in model.parameters() if p.requires_grad and p.grad is not None]
     assert grads, "expected gradients"
     assert all(torch.isfinite(g).all() for g in grads)
+
+
+def test_shipped_configs_can_represent_every_token_id() -> None:
+    """A config whose vocab is too small fails only as an async CUDA assert.
+
+    model_87m.yaml once carried vocab_size 280 while MASK_ID was 280, so the
+    masked-byte path indexed one past the embedding. On CPU that is a clean
+    IndexError; on GPU it is a device-side gather assert on the first batch,
+    after the data build has already been paid for.
+    """
+    from spelling_reranker.byte_encoding import VOCAB_SIZE
+
+    root = Path(__file__).resolve().parents[1]
+    for path in sorted((root / "configs").glob("model_*.yaml")):
+        cfg = model_config_from_mapping(load_yaml(path))
+        assert cfg.vocab_size >= VOCAB_SIZE, f"{path.name}: vocab_size {cfg.vocab_size} < {VOCAB_SIZE}"
+        assert cfg.n_candidates <= N_CANDIDATE_SLOTS, f"{path.name}: too many candidate slots"
+
+
+def test_undersized_vocab_is_rejected_at_construction() -> None:
+    from spelling_reranker.byte_encoding import VOCAB_SIZE
+
+    with pytest.raises(ValueError, match="smaller than the byte vocabulary"):
+        ByteSpellingReranker(ModelConfig(vocab_size=VOCAB_SIZE - 1))

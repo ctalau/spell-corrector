@@ -197,6 +197,21 @@ class ByteSpellingReranker(nn.Module):
         super().__init__()
         self.cfg = cfg or ModelConfig()
         cfg = self.cfg
+        # Fail here, on CPU, with a readable message. A config whose vocab is
+        # too small does not fail at construction: it fails as an asynchronous
+        # device-side gather assert on the first batch that happens to contain
+        # the offending id, which is both unreadable and arbitrarily delayed.
+        if cfg.vocab_size < VOCAB_SIZE:
+            raise ValueError(
+                f"vocab_size={cfg.vocab_size} is smaller than the byte vocabulary "
+                f"({VOCAB_SIZE}); ids up to {VOCAB_SIZE - 1} (MASK={MASK_ID}) would "
+                "index out of bounds"
+            )
+        if cfg.n_candidates > N_CANDIDATE_SLOTS:
+            raise ValueError(
+                f"n_candidates={cfg.n_candidates} exceeds the {N_CANDIDATE_SLOTS} "
+                "CAND tokens defined in the vocabulary"
+            )
         self.embed = nn.Embedding(cfg.vocab_size, cfg.d_model, padding_idx=cfg.pad_id)
         self.embed_dropout = nn.Dropout(cfg.dropout)
         self.rope = RotaryEmbedding(cfg.head_dim, cfg.max_seq_len, cfg.rope_theta)

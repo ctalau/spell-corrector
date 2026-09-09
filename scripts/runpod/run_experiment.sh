@@ -27,6 +27,12 @@ die() { echo "EXPERIMENT FAILED: $1"; exit 1; }
 log "unit tests"
 "${PYTHON:-python}" -m pytest tests/ -q || die "unit tests"
 
+# Before anything expensive: build every training config on the real GPU and
+# take an optimizer step with all code paths live. A config error otherwise
+# surfaces only after the 20+ minute data build.
+log "preflight (configs on GPU)"
+"${PYTHON:-python}" scripts/preflight.py || die "preflight"
+
 log "typo generator calibration (public misspelling list)"
 # Diagnostic only: never let it gate the run.
 "${PYTHON:-python}" scripts/calibrate_typo_model.py || echo "calibration skipped"

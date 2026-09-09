@@ -84,3 +84,32 @@ from the structure of the task, not tuned against BEA.
 | ED3+ | 2.44% | 4.92% |
 | Hunspell gold at rank 0 | 80.11% | 81.08% |
 | Gold absent from pool | 5.31% | 8.22% |
+
+## Run configuration
+
+| Setting | Value |
+|---|---|
+| Model | `configs/model_87m.yaml` — 12 layers, d_model 768, SwiGLU 2048, 87.4M params |
+| Vocabulary | 281 (256 bytes + 24 specials + MASK) |
+| Sequence budget | 448 bytes |
+| Candidate slots | 16 |
+| Training examples | 3,000,000 train / 60,000 validation |
+| Epochs | 2 (~11,700 optimizer steps) |
+| Effective batch | 512 (microbatch 128 x accum 4) |
+| Optimizer | AdamW, lr 3e-4, betas (0.9, 0.95), wd 0.10 |
+| Schedule | 3% linear warmup, cosine to 5% of peak |
+| Auxiliary loss | masked-byte, weight 0.20, p=0.12, decayed to 0 by 60% of training |
+| Precision | bf16 |
+| Seed | 1337 |
+
+Data-build settings: 60k word vocabulary, 4–24 typos per word (~600k unique
+typos), context noise p=0.25, gold-index-0 capped at 65%, at most 8 contexts
+per typo.
+
+## How the run is driven
+
+The controlling environment has outbound HTTPS only, so the pod is not driven
+over SSH. `scripts/runpod/launch.py` sets the container entrypoint to
+`scripts/runpod/bootstrap.sh`, which clones the branch, runs setup, runs the
+experiment, and serves progress and artifacts on port 8000 through Runpod's
+HTTP proxy. `scripts/runpod/fetch_artifacts.py` pulls the results back.

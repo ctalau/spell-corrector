@@ -89,3 +89,17 @@ benchmark only**.
   downloader, recorded checksums after a local run, and metric reports instead.
 
 Upstream shared task: [BEA-2019](https://www.cl.cam.ac.uk/research/nl/bea2019st/).
+
+## Typo-generator calibration list
+
+`data/wikipedia_misspellings.txt` is a copy of Wikipedia's
+[Lists of common misspellings (machine-readable)](https://en.wikipedia.org/wiki/Wikipedia:Lists_of_common_misspellings/For_machines),
+~4.3k authentic `misspelling->correction` pairs.
+
+**License:** CC BY-SA, same as WikiText. Attribution: Wikipedia contributors.
+
+It is vendored rather than fetched so that calibration is reproducible and does
+not depend on a network call (Wikipedia also rejects unidentified clients with
+403). It is used only to check that the synthetic typo distribution resembles
+authentic human misspellings — see `scripts/calibrate_typo_model.py`. It is
+**not** training data, and it is not the held-out benchmark.

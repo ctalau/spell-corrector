@@ -42,12 +42,14 @@ SOURCE_URL = (
     "https://en.wikipedia.org/wiki/"
     "Wikipedia:Lists_of_common_misspellings/For_machines?action=raw"
 )
+#: Wikipedia rejects requests that do not identify themselves and returns 403.
+USER_AGENT = "spell-corrector/1.0 (typo-generator calibration; +https://github.com/ctalau/spell-corrector)"
 
 
 def load_pairs(cache: Path) -> list[tuple[str, str]]:
     if not cache.is_file():
         cache.parent.mkdir(parents=True, exist_ok=True)
-        response = requests.get(SOURCE_URL, timeout=120)
+        response = requests.get(SOURCE_URL, timeout=120, headers={"User-Agent": USER_AGENT})
         response.raise_for_status()
         cache.write_text(response.text, encoding="utf-8")
     pairs: list[tuple[str, str]] = []
@@ -99,7 +101,9 @@ def profile(pairs: list[tuple[str, str]], engine) -> dict:
 
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--cache", type=Path, default=ROOT / "data" / "raw" / "wikipedia_misspellings.txt")
+    # Vendored in the repo: the calibration should not depend on a network
+    # fetch, and pinning the list keeps the reference distribution stable.
+    parser.add_argument("--cache", type=Path, default=ROOT / "data" / "wikipedia_misspellings.txt")
     parser.add_argument("--output", type=Path, default=ROOT / "reports" / "typo_calibration.json")
     parser.add_argument("--seed", type=int, default=DEFAULT_SEED)
     parser.add_argument("--n-synthetic", type=int, default=4000)

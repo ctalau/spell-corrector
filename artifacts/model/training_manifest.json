@@ -1,0 +1,44 @@
+{
+  "git_commit": "edf5fafe274be7862bc98d816dbae79b15ae96db",
+  "seed": 1337,
+  "dataset_hashes": {
+    "train": "1f609447255599343633abf5794a2b31725588aedd74f98ef6f8e4263997914d",
+    "validation": "f8aa13c56498f54026ba8deed3a02dfea1439cd1834a3b86ba1eb8d1e8c3bdd1"
+  },
+  "train_examples": 235626,
+  "validation_examples": 19642,
+  "pytorch": "2.8.0+cu128",
+  "cuda": "12.8",
+  "gpu": "NVIDIA GeForce RTX 3090",
+  "device": "cuda",
+  "amp_bf16": true,
+  "total_trainable_parameters": 27904129,
+  "microbatch": 128,
+  "grad_accumulation": 2,
+  "effective_batch_size": 256,
+  "optimizer_steps": 2760,
+  "training_duration_sec": 2101.4575700759888,
+  "best_validation_loss": 0.27298623713076864,
+  "best_validation_acc_top1": 0.9059668058363923,
+  "last_validation": {
+    "loss": 0.27298623713076864,
+    "acc_top1": 0.9059668058363923,
+    "acc_top3": 0.9856430098767947,
+    "n": 19642,
+    "acc_by_gold_index": {
+      "0": 0.9736842105263158,
+      "1": 0.7561665992721391,
+      "2": 0.7330960854092526,
+      "3": 0.7722513089005235,
+      "4": 0.8003442340791739,
+      "5": 0.7058823529411765,
+      "6": 0.7368421052631579,
+      "7": 0.7346938775510204,
+      "8": 0.826797385620915,
+      "9": 0.8113207547169812
+    }
+  },
+  "nan_seen": false,
+  "hostname": "3132358b435a",
+  "config": "configs/train_full.yaml"
+}

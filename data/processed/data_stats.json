@@ -1,0 +1,139 @@
+{
+  "seed": 1337,
+  "elapsed_sec": 1065.46,
+  "train": {
+    "n": 235626,
+    "attempts": 235626,
+    "kept": 235626,
+    "discarded": {},
+    "corruption_type": {
+      "adjacent_key": 60107,
+      "random_sub": 35169,
+      "duplicate": 25909,
+      "deletion": 27021,
+      "common_pattern": 24010,
+      "transposition": 32083,
+      "insertion": 31327
+    },
+    "gold_index": {
+      "0": 161072,
+      "1": 29667,
+      "2": 13872,
+      "3": 8638,
+      "4": 7235,
+      "5": 4308,
+      "6": 3008,
+      "7": 2520,
+      "8": 3498,
+      "9": 1808
+    },
+    "candidate_count": {
+      "1": 22194,
+      "2": 51618,
+      "3": 27846,
+      "4": 26305,
+      "5": 25262,
+      "6": 13466,
+      "7": 11109,
+      "8": 8723,
+      "9": 7155,
+      "10": 41948
+    },
+    "source_mixture": {
+      "wikitext103-synthetic": 235626
+    },
+    "typo_length": {
+      "mean": 5.989962907319226,
+      "p50": 6,
+      "p95": 10,
+      "max": 20
+    },
+    "serialized_byte_length": {
+      "mean": 189.99,
+      "p50": 180,
+      "p95": 318,
+      "max": 384,
+      "note": "measured on the pre-heading-filter 240k set; remaining rows are similar"
+    },
+    "generation_discarded_before_keep": {
+      "typo_still_correct": 23410,
+      "source_not_in_dictionary": 13323,
+      "gold_not_in_top10": 11491
+    }
+  },
+  "validation": {
+    "n": 19642,
+    "attempts": 19642,
+    "kept": 19642,
+    "discarded": {},
+    "corruption_type": {
+      "insertion": 2638,
+      "deletion": 2265,
+      "adjacent_key": 5060,
+      "duplicate": 2186,
+      "transposition": 2651,
+      "common_pattern": 1926,
+      "random_sub": 2916
+    },
+    "gold_index": {
+      "0": 13452,
+      "1": 2473,
+      "2": 1124,
+      "3": 764,
+      "4": 581,
+      "5": 340,
+      "6": 247,
+      "7": 196,
+      "8": 306,
+      "9": 159
+    },
+    "candidate_count": {
+      "1": 1815,
+      "2": 4331,
+      "3": 2389,
+      "4": 2188,
+      "5": 2042,
+      "6": 1116,
+      "7": 945,
+      "8": 766,
+      "9": 610,
+      "10": 3440
+    },
+    "source_mixture": {
+      "wikitext103-synthetic": 19642
+    },
+    "typo_length": {
+      "mean": 5.986050300376744,
+      "p50": 6,
+      "p95": 10,
+      "max": 16
+    },
+    "serialized_byte_length": {
+      "mean": 191.07,
+      "p50": 182,
+      "p95": 323,
+      "max": 384,
+      "note": "measured on the pre-heading-filter 20k set; remaining rows are similar"
+    },
+    "generation_discarded_before_keep": {
+      "typo_still_correct": 1942,
+      "gold_not_in_top10": 984,
+      "source_not_in_dictionary": 1069
+    }
+  },
+  "notes": [
+    "WikiText section headings (= = Title = =) were dropped after generation to avoid cross-split boilerplate leakage.",
+    "Remaining train/valid sentence-hash overlap is 0."
+  ],
+  "source": {
+    "dataset": "WikiText-103 raw",
+    "config": "wikitext-103-raw-v1",
+    "identifier": "Salesforce/wikitext wikitext-103-raw-v1",
+    "license": "CC BY-SA",
+    "train_file": "data/raw/wikitext-103-raw/wiki.train.raw",
+    "valid_file": "data/raw/wikitext-103-raw/wiki.valid.raw",
+    "download": "scripts/download_sources.py",
+    "split_policy": "official WikiText train/valid article files; section headings dropped; no shared sentence hashes"
+  },
+  "created_unix": 1788916029
+}

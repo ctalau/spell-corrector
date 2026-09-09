@@ -1,0 +1,33 @@
+seed: 1337
+model: configs/model_28m.yaml
+
+data:
+  train: data/processed/train.parquet
+  validation: data/processed/validation.parquet
+
+training:
+  dtype: bf16
+  epochs: 3
+  optimizer: adamw
+  learning_rate: 3.0e-4
+  betas: [0.9, 0.95]
+  eps: 1.0e-8
+  weight_decay: 0.10
+  warmup_ratio: 0.05
+  scheduler: cosine
+  max_grad_norm: 1.0
+  effective_batch_size: 256
+  microbatch: 128
+  grad_accumulation: 2
+  num_workers: 4
+  pin_memory: true
+  compile: false
+  log_every: 20
+  eval_every: 200
+  max_steps: null
+
+output:
+  dir: artifacts
+  metrics_jsonl: artifacts/train_metrics.jsonl
+  summary_json: artifacts/train_summary.json
+  model_dir: artifacts/model

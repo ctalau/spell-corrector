@@ -1,0 +1,57 @@
+# Frozen answerdotai/ModernBERT-base encoder + trainable selector head.
+# No LoRA, no backbone finetuning. See reports/FROZEN_ENCODER_PLAN.md.
+seed: 1337
+frozen: true
+
+encoder:
+  model_id: answerdotai/ModernBERT-base
+  # Hugging Face commit of answerdotai/ModernBERT-base resolved 2026-09-09.
+  revision: 8949b909ec900327062f0ebf497f51aef5e6f0c8
+  max_length: 512
+  hidden_size: 768
+  n_candidates: 10
+  extract_batch_size: 16
+  dtype: bf16
+  pooling: mean_last_layer
+  first_ten_policy: raw_slice
+  frozen: true
+
+data:
+  train: data/processed/train.parquet
+  validation: data/processed/validation.parquet
+  train_subset: 200000
+  dpair_target: 20000
+  subset_by: example_id
+
+cache:
+  dir: artifacts/frozen_cache
+  precision: fp16
+  shard_size: 10000
+
+training:
+  optimizer: adamw
+  learning_rate: 1.0e-3
+  weight_decay: 0.01
+  betas: [0.9, 0.999]
+  eps: 1.0e-8
+  batch_size: 512
+  epochs: 10
+  patience: 2
+  dropout: 0.1
+  mlp_hidden: [256, 64]
+  max_grad_norm: 1.0
+  log_every: 5
+  checkpoint_every_steps: 50
+  checkpoint_every_seconds: 1800
+  bea_gate_delta: 0.01
+  bea_limit: 1000
+  # One predeclared H3 retry if the 1e-3 run is unstable.
+  retry_lr: 3.0e-4
+  num_workers: 0
+  pin_memory: true
+
+output:
+  dir: artifacts/frozen
+  metrics_jsonl: artifacts/frozen/train_metrics.jsonl
+  summary_json: artifacts/frozen/train_summary.json
+  model_dir: artifacts/frozen/heads

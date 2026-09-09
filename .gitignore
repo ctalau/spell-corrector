@@ -29,10 +29,14 @@ data/bea60k/
 data/cache/
 *.zip
 
+# Frozen-encoder feature caches (multi-GB). Manifests/hashes live in artifacts/frozen.
+artifacts/frozen_cache/
+
 # Local logs / scratch
 *.log
 tmp/
 .cache/
+.venv/
 
 # OS
 .DS_Store

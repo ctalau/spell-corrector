@@ -119,13 +119,21 @@ def main() -> int:
         # and never exits, so a failure inside the bootstrap shows up as a
         # readable log instead of a crash-looping container with nothing
         # listening.
+        # The fetch is retried: on a cold container the entrypoint can run
+        # before networking is ready, and a single failed curl would leave the
+        # pod idling forever with nothing to do.
         entry = (
             "mkdir -p /workspace/out; "
             "(nohup python3 -m http.server 8000 --directory /workspace/out "
             ">/dev/null 2>&1 &); "
-            f"curl -fsSL {bootstrap_url} -o /workspace/out/bootstrap.sh "
-            "&& bash /workspace/out/bootstrap.sh; "
+            "for i in $(seq 1 30); do "
+            f"curl -fsSL {bootstrap_url} -o /workspace/out/bootstrap.sh && break; "
+            "echo \"entrypoint: fetch attempt $i failed\" >> /workspace/out/run.log; "
+            "sleep 10; done; "
+            "if [ -s /workspace/out/bootstrap.sh ]; then "
+            "bash /workspace/out/bootstrap.sh; "
             "echo \"entrypoint: bootstrap exited rc=$?\" >> /workspace/out/run.log; "
+            "else echo 'entrypoint: could not fetch bootstrap' >> /workspace/out/run.log; fi; "
             "sleep infinity"
         )
         payload["dockerEntrypoint"] = ["/bin/bash", "-lc", entry]

@@ -139,9 +139,10 @@ a small selector. Launch on Runpod with:
 ```bash
 python scripts/runpod/launch.py \
   --experiment frozen \
-  --branch cursor/frozen-modernbert-selector-31a7 \
   --config configs/train_frozen_modernbert.yaml
 ```
+
+That defaults to the cu124 / Python 3.11 image (`runpod/pytorch:2.4.0-py3.11-cuda12.4.1-devel-ubuntu22.04`) so Hunspell and `transformers>=4.48,<5` both work. Do not use the cu128 / py3.12 torch 2.8 image until Hunspell is fixed for 3.12. See [reports/FROZEN_ENCODER.md](reports/FROZEN_ENCODER.md).
 
 Local GPU path (after synthetic parquet exists):
 

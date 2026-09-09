@@ -12,7 +12,7 @@ Resolved from `answerdotai/ModernBERT-base` HEAD on 2026-09-09:
 |---|---|
 | Model id | `answerdotai/ModernBERT-base` |
 | Revision | `8949b909ec900327062f0ebf497f51aef5e6f0c8` |
-| `transformers` | `>=4.48` (ModernBERT support) |
+| `transformers` | `>=4.48,<5` (ModernBERT; 5.x needs torch>=2.5) |
 | Max length | 512 |
 | Hidden size | 768 |
 | Candidate policy | Hunspell **raw first ten** (slice before dedup/length filter) |
@@ -27,15 +27,16 @@ From a machine with `RUNPOD_KEY` set:
 ```bash
 python scripts/runpod/launch.py \
   --experiment frozen \
-  --branch cursor/frozen-modernbert-selector-31a7 \
   --config configs/train_frozen_modernbert.yaml
 ```
+
+Frozen pods default to **`runpod/pytorch:2.4.0-py3.11-cuda12.4.1-devel-ubuntu22.04`** (Python 3.11 so `hunspell==0.5.5` builds, torch 2.4.1, `transformers>=4.48,<5` for ModernBERT). Do **not** use `runpod/pytorch:1.0.2-cu1281-torch280-ubuntu2404` (cu128 / torch 2.8 / py3.12): hunspell 0.5.5 cannot build there (`setuptools<60` / `ImpImporter`) until the binding is fixed for 3.12.
 
 Equivalent: `--config configs/train_frozen_modernbert.yaml` alone sets
 `EXPERIMENT=frozen`. The pod prefers an RTX A5000 (24 GB), 100 GB disk, then
 runs `scripts/runpod/run_frozen_experiment.sh`:
 
-1. Fail-fast CUDA check and `transformers>=4.48`.
+1. Fail-fast CUDA check, install `transformers>=4.48,<5`, and assert `AutoModel` imports.
 2. Unit tests.
 3. Synthetic data build if parquet is missing (400k/40k targets, then a
    deterministic 200k-by-example-id subset plus D-pair).

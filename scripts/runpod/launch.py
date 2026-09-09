@@ -82,6 +82,18 @@ def main() -> int:
     parser.add_argument("--target-valid", type=int, default=60_000)
     parser.add_argument("--config", default="configs/train_full.yaml")
     parser.add_argument("--idle", action="store_true", help="do not auto-run the experiment")
+    parser.add_argument(
+        "--bootstrap-path",
+        default="scripts/runpod/bootstrap.sh",
+        help="repo-relative path to the entrypoint script the pod fetches and runs",
+    )
+    parser.add_argument(
+        "--env",
+        action="append",
+        default=[],
+        metavar="KEY=VALUE",
+        help="extra environment variable for the pod, repeatable",
+    )
     args = parser.parse_args()
 
     # Pin to an exact commit rather than the branch name. raw.githubusercontent
@@ -100,7 +112,14 @@ def main() -> int:
             raise SystemExit(f"cannot resolve {args.branch}: {ref.status_code} {ref.text[:200]}")
         commit = ref.text.strip()
     raw_base = args.repo_url.replace("https://github.com/", "https://raw.githubusercontent.com/")
-    bootstrap_url = f"{raw_base}/{commit}/scripts/runpod/bootstrap.sh"
+    bootstrap_url = f"{raw_base}/{commit}/{args.bootstrap_path}"
+
+    extra_env = {}
+    for item in args.env:
+        key, sep, value = item.partition("=")
+        if not sep:
+            raise SystemExit(f"--env expects KEY=VALUE, got {item!r}")
+        extra_env[key] = value
 
     gpus = args.gpu or GPU_PREFERENCE
     payload = {
@@ -121,6 +140,7 @@ def main() -> int:
             "TARGET_TRAIN": str(args.target_train),
             "TARGET_VALID": str(args.target_valid),
             "CONFIG": args.config,
+            **extra_env,
         },
     }
     if not args.idle:

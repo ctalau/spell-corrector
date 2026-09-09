@@ -25,6 +25,8 @@ dependencies = [
 
 [project.optional-dependencies]
 dev = ["pytest>=8.0"]
+# scripts/llm_judge_bea60k.py only -- not needed for the trained reranker.
+llm-judge = ["transformers>=4.57", "accelerate>=0.34"]
 
 [tool.setuptools.packages.find]
 include = ["spelling_reranker*"]

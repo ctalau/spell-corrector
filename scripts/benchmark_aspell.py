@@ -37,9 +37,7 @@ def main() -> int:
 
     bea = _load_bea_module()
     pairs = bea.load_bea_pairs(args.bea_dir)
-    errors = []
-    for noisy, clean in pairs:
-        errors.extend(bea.align_errors(noisy, clean))
+    errors = bea.extract_word_errors(pairs)
     if args.max_examples is not None:
         errors = errors[: args.max_examples]
 

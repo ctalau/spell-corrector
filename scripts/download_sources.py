@@ -9,7 +9,6 @@ import sys
 import zipfile
 from pathlib import Path
 
-import pyarrow.parquet as pq
 import requests
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -77,6 +76,11 @@ def reconstruct_from_parquet(out_dir: Path) -> Path:
             local = out_dir / "hf_parquet" / part
             if not local.is_file():
                 download(f"{PARQUET_BASE}/{part}", local)
+            # Imported lazily: only the parquet fallback needs pyarrow, and
+            # setup runs this download concurrently with the pip install that
+            # provides it.
+            import pyarrow.parquet as pq
+
             table = pq.read_table(local, columns=["text"])
             lines.extend(str(x) if x is not None else "" for x in table.column("text").to_pylist())
         dest.write_text("\n".join(lines) + "\n", encoding="utf-8")

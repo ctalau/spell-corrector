@@ -3,7 +3,7 @@
 A separate track from the trained ~28M byte-level reranker (`reports/EXPERIMENT.md`):
 instead of a purpose-trained model, a general-purpose small instruction-tuned LLM is
 prompted zero-shot with Hunspell's numbered suggestion list and asked to pick the
-best one. Code: `spelling_reranker/llm_judge.py`, `scripts/llm_judge_bea60k.py`.
+best one. Code: `spelling_reranker/llm_judge_cpu.py`, `scripts/llm_judge_bea60k_cpu.py`.
 
 ## Setup
 
@@ -59,7 +59,7 @@ actually one of the candidates shown (83/100 on the fixed sample for all three
 models, since all three were shown the same examples).
 
 Full machine-readable results:
-`reports/llm_judge/{qwen3.5-0.8b,gemma-4-e2b,minicpm5-1b}/results.json`,
+`reports/llm_judge_cpu/{qwen3.5-0.8b,gemma-4-e2b,minicpm5-1b}/results.json`,
 per-example predictions in `predictions_sample100.jsonl` / `predictions_timed.jsonl`,
 and latency histograms (JSON/CSV/PNG) alongside them.
 
@@ -178,7 +178,7 @@ still resolves incorrectly (now to "Mike" rather than the typo itself) -- correc
 so, since "McCain" is too many edits away from "Miken" to recover with this
 method; that one was never the scoring bug's fault. Full predictions with all
 surviving beam candidates and their scores per example:
-`reports/llm_judge/{gemma-4-e2b-open,gemma-4-e2b-beam}/predictions_sample100.jsonl`.
+`reports/llm_judge_cpu/{gemma-4-e2b-open,gemma-4-e2b-beam}/predictions_sample100.jsonl`.
 
 **Latency is not comparable across these three rows and is deliberately left out
 of the table.** The open-mode run happened to hit a period of unusually slow disk
@@ -199,30 +199,32 @@ general; both are one-off measurements on a noisy shared box.
 
 ```bash
 python scripts/download_bea60k.py
-python scripts/llm_judge_bea60k.py \
+python scripts/llm_judge_bea60k_cpu.py \
     --model-id Qwen/Qwen3.5-0.8B --model-name qwen3.5-0.8b \
-    --bea-dir data/bea60k --output reports/llm_judge/qwen3.5-0.8b
-python scripts/llm_judge_bea60k.py \
+    --bea-dir data/bea60k --output reports/llm_judge_cpu/qwen3.5-0.8b
+python scripts/llm_judge_bea60k_cpu.py \
     --model-id google/gemma-4-E2B-it --model-name gemma-4-e2b \
-    --bea-dir data/bea60k --output reports/llm_judge/gemma-4-e2b
-python scripts/llm_judge_bea60k.py \
+    --bea-dir data/bea60k --output reports/llm_judge_cpu/gemma-4-e2b
+python scripts/llm_judge_bea60k_cpu.py \
     --model-id openbmb/MiniCPM5-1B --model-name minicpm5-1b \
-    --bea-dir data/bea60k --output reports/llm_judge/minicpm5-1b
+    --bea-dir data/bea60k --output reports/llm_judge_cpu/minicpm5-1b
 
 # Open-answer ablation (same 100-sample subset, candidates shown only as a hint):
-python scripts/llm_judge_bea60k.py \
+python scripts/llm_judge_bea60k_cpu.py \
     --model-id google/gemma-4-E2B-it --model-name gemma-4-e2b-open \
-    --bea-dir data/bea60k --output reports/llm_judge/gemma-4-e2b-open \
+    --bea-dir data/bea60k --output reports/llm_judge_cpu/gemma-4-e2b-open \
     --answer-mode open --skip-timed
 
 # Beam-search ablation (same 100-sample subset, no Hunspell candidates at all):
-python scripts/llm_judge_bea60k.py \
+python scripts/llm_judge_bea60k_cpu.py \
     --model-id google/gemma-4-E2B-it --model-name gemma-4-e2b-beam \
-    --bea-dir data/bea60k --output reports/llm_judge/gemma-4-e2b-beam \
+    --bea-dir data/bea60k --output reports/llm_judge_cpu/gemma-4-e2b-beam \
     --answer-mode beam --beam-width 3 --edit-distance-weight 1.0 --skip-timed
 ```
 
-On a GPU pod, `scripts/runpod/bootstrap_llm_judge.sh` runs both automatically (see
-`scripts/runpod/launch.py --bootstrap-path scripts/runpod/bootstrap_llm_judge.sh
---env MODEL_A_ID=... --env MODEL_B_ID=...`); this run instead used the CLI directly
-on the local CPU box since `RUNPOD_KEY` was not available.
+This track was built and validated directly on the local CPU box since
+`RUNPOD_KEY` was not available in this session -- no pod, no bootstrap script.
+For GPU execution, `scripts/llm_judge_bea60k.py` / `spelling_reranker/llm_judge.py`
+/ `scripts/runpod/bootstrap_llm_judge.sh` are a separate, GPU-validated index-mode
+implementation (this CPU track's "open"/"beam" answer modes and the edit-distance
+reranker are not part of that one).

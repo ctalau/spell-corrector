@@ -1,4 +1,4 @@
-from spelling_reranker.llm_judge import (
+from spelling_reranker.llm_judge_cpu import (
     LATENCY_BIN_EDGES_MS,
     build_generative_messages,
     build_messages,

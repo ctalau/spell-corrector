@@ -1,11 +1,19 @@
-"""LLM-judge experiment helpers.
+"""LLM-judge experiment helpers -- CPU-local track.
 
 A separate track from the trained byte-level reranker (spelling_reranker/model.py):
 here a general-purpose instruction-tuned LLM is prompted zero-shot with
-Hunspell's numbered suggestion list and asked to pick the best one. See
-scripts/llm_judge_bea60k.py for the runnable CLI and reports/llm_judge/ for
-results. Requires torch + transformers + a GPU; run on Runpod
-(scripts/runpod/bootstrap_llm_judge.sh), never on the local CPU-only box.
+Hunspell's numbered suggestion list and asked to pick the best one, or (in
+"open"/"beam" answer modes) to correct the typo without being restricted to
+Hunspell's list at all. See scripts/llm_judge_bea60k_cpu.py for the runnable
+CLI and reports/llm_judge_cpu/ for results.
+
+Named "_cpu" to sit alongside `spelling_reranker/llm_judge.py` (the GPU/Runpod
+track, index-mode only, with the torch/cudnn pinning a real GPU pod needs).
+This module requires torch + transformers but was written for and validated
+on a CPU-only box directly via the CLI -- no pod, no bootstrap script.
+Expect it to be slow (multi-second per call for a ~1-10B model on 4 vCPUs),
+which is exactly what the results in reports/EXPERIMENT_LLM_JUDGE_CPU.md
+document, latency included.
 """
 
 from __future__ import annotations

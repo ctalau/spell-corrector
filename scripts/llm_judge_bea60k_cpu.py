@@ -1,14 +1,21 @@
 #!/usr/bin/env python3
-"""LLM-judge experiment on the locked BEA-60K benchmark.
+"""LLM-judge experiment on the locked BEA-60K benchmark -- CPU-local track.
 
 Prompts a small instruction-tuned LLM to pick the best Hunspell suggestion
-for each BEA-60K word error, and measures per-call latency. This is a
-separate experiment track from the trained byte-level reranker
+for each BEA-60K word error (or, in "open"/"beam" modes, to correct the typo
+without being limited to Hunspell's list), and measures per-call latency.
+This is a separate experiment track from the trained byte-level reranker
 (scripts/benchmark_bea60k.py) -- here the "reranker" is a general-purpose
 LLM prompted zero-shot, not a purpose-trained model.
 
-Requires a GPU (transformers + torch); run this on Runpod, never on the
-local CPU-only box (see CLAUDE.md). See scripts/runpod/bootstrap_llm_judge.sh.
+CPU-local track: named "_cpu" to sit alongside scripts/llm_judge_bea60k.py
+(the GPU/Runpod track -- index-mode only, with the torch/cudnn pinning
+needed on a real pod). CLAUDE.md's default is GPU work on Runpod, but
+`RUNPOD_KEY` was unavailable when this track was built, so it was written
+for and validated directly on a CPU-only box: expect several seconds per
+call for a ~1-10B model on 4 vCPUs (see reports/EXPERIMENT_LLM_JUDGE_CPU.md
+for real measured latencies, not estimates). No pod, no bootstrap script --
+just run the CLI below.
 
 Two phases per model, both drawn from the same seeded shuffle of BEA errors
 that Hunspell flagged and produced at least one suggestion for, so the two
@@ -19,9 +26,9 @@ models see directly comparable examples:
      as many examples as fit in the budget, for throughput/latency at scale.
 
 Usage:
-    python scripts/llm_judge_bea60k.py \\
+    python scripts/llm_judge_bea60k_cpu.py \\
         --model-id Qwen/Qwen3.5-0.8B --model-name qwen3.5-0.8b \\
-        --bea-dir data/bea60k --output reports/llm_judge/qwen3.5-0.8b
+        --bea-dir data/bea60k --output reports/llm_judge_cpu/qwen3.5-0.8b
 """
 
 from __future__ import annotations
@@ -43,7 +50,7 @@ from spelling_reranker.bea60k import extract_word_errors, load_bea_pairs
 from spelling_reranker.byte_encoding import nfc
 from spelling_reranker.candidates import build_pool
 from spelling_reranker.hunspell import default_engine
-from spelling_reranker.llm_judge import (
+from spelling_reranker.llm_judge_cpu import (
     beam_word_candidates,
     build_generative_messages,
     build_messages,

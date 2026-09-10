@@ -196,6 +196,7 @@ def main() -> int:
             "TARGET_VALID": str(args.target_valid),
             "CONFIG": args.config,
             "EXPERIMENT": args.experiment,
+            **extra_env,
         },
     }
     if not args.idle:

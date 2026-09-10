@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
-# Pod entrypoint for the LLM-judge experiment: two small instruct LLMs prompt-
-# select the best Hunspell suggestion for BEA-60K word errors; see
+# Pod entrypoint for the LLM-judge experiment: one or two small instruct LLMs
+# prompt-select the best Hunspell suggestion for BEA-60K word errors; see
 # scripts/llm_judge_bea60k.py and reports/EXPERIMENT_LLM_JUDGE.md.
 #
 # Runs as the container's entrypoint (see scripts/runpod/bootstrap.sh for why:
@@ -15,7 +15,14 @@
 # Configured by environment variables set at pod creation:
 #   REPO_URL, REPO_BRANCH, REPO_COMMIT
 #   MODEL_A_ID, MODEL_A_NAME, MODEL_B_ID, MODEL_B_NAME
-#   N_SAMPLES (default 100), TIME_BUDGET_SECONDS (default 300)
+#     MODEL_B_ID empty/none/null/skip -> run MODEL_A only (Gemma-only path)
+#   N_SAMPLES (default 100)
+#   TIME_BUDGET_SECONDS (default 300). A value other than 300 skips the
+#     100-sample phase unless ALSO_SAMPLE=1, so TIME_BUDGET_SECONDS=3600 is a
+#     single 1-hour timed pass.
+#   FULL_BEA=1 -> pass --full (non-wrapping eligible set; still honors
+#     TIME_BUDGET_SECONDS).
+#   ALSO_SAMPLE=1 -> keep the fixed n-samples phase even for long/full runs.
 # Deliberately no `set -u`: this script sources the image's profile scripts.
 set -o pipefail
 
@@ -78,7 +85,8 @@ fi
 echo "python now $PYTHON ($($PYTHON -V 2>&1))"
 
 status "unit tests"
-"$PYTHON" -m pytest tests/test_llm_judge.py tests/test_byte_encoding.py -q || fail "unit tests"
+"$PYTHON" -m pytest tests/test_llm_judge.py tests/test_llm_judge_harness.py tests/test_byte_encoding.py -q \
+    || fail "unit tests"
 
 status "downloading BEA-60K"
 "$PYTHON" scripts/download_bea60k.py || fail "BEA-60K download"
@@ -89,24 +97,62 @@ MODEL_B_ID="${MODEL_B_ID:-google/gemma-4-E2B-it}"
 MODEL_B_NAME="${MODEL_B_NAME:-gemma-4-e2b}"
 N_SAMPLES="${N_SAMPLES:-100}"
 TIME_BUDGET_SECONDS="${TIME_BUDGET_SECONDS:-300}"
+FULL_BEA="${FULL_BEA:-0}"
+ALSO_SAMPLE="${ALSO_SAMPLE:-0}"
+
+skip_model() {
+    local raw="${1:-}"
+    local lowered
+    lowered="$(printf '%s' "$raw" | tr '[:upper:]' '[:lower:]')"
+    case "$lowered" in
+        ""|none|null|skip) return 0 ;;
+        *) return 1 ;;
+    esac
+}
+
+EXTRA_ARGS=(--n-samples "$N_SAMPLES" --time-budget-seconds "$TIME_BUDGET_SECONDS")
+if [ "$FULL_BEA" = "1" ]; then
+    EXTRA_ARGS+=(--full)
+fi
+if [ "$ALSO_SAMPLE" = "1" ]; then
+    EXTRA_ARGS+=(--also-sample)
+elif [ "$FULL_BEA" = "1" ] || [ "$TIME_BUDGET_SECONDS" != "300" ]; then
+    # Long timed runs (e.g. 3600s) and --full skip the old sample100 + 300s combo
+    # unless ALSO_SAMPLE=1. Default TIME_BUDGET_SECONDS=300 keeps both phases.
+    EXTRA_ARGS+=(--skip-sample)
+fi
+
+echo "llm_judge extra args: ${EXTRA_ARGS[*]}"
+echo "MODEL_A=${MODEL_A_ID} MODEL_B=${MODEL_B_ID}"
 
 RC=0
-for pair in "$MODEL_A_ID|$MODEL_A_NAME" "$MODEL_B_ID|$MODEL_B_NAME"; do
-    model_id="${pair%%|*}"
-    model_name="${pair##*|}"
+NAMES=()
+run_model() {
+    local model_id="$1"
+    local model_name="$2"
+    if skip_model "$model_id"; then
+        echo "skipping empty/none model ($model_name)"
+        return 0
+    fi
+    NAMES+=("$model_name")
     status "running $model_name"
     "$PYTHON" scripts/llm_judge_bea60k.py \
         --model-id "$model_id" \
         --model-name "$model_name" \
         --bea-dir data/bea60k \
         --output "reports/llm_judge/$model_name" \
-        --n-samples "$N_SAMPLES" \
-        --time-budget-seconds "$TIME_BUDGET_SECONDS" \
+        "${EXTRA_ARGS[@]}" \
         || { echo "MODEL FAILED: $model_name"; RC=1; }
-done
+}
+
+run_model "$MODEL_A_ID" "$MODEL_A_NAME"
+run_model "$MODEL_B_ID" "$MODEL_B_NAME"
+if [ "${#NAMES[@]}" -eq 0 ]; then
+    fail "no models to run (MODEL_A_ID and MODEL_B_ID are empty/none)"
+fi
 
 status "summarizing"
-"$PYTHON" - "$MODEL_A_NAME" "$MODEL_B_NAME" <<'PY' || true
+"$PYTHON" - "${NAMES[@]}" <<'PY' || true
 import json
 import sys
 from pathlib import Path
@@ -124,14 +170,30 @@ for name, res in summary.items():
     if "error" in res:
         print(f"{name}: {res['error']}")
         continue
-    s100 = res.get("sample_100", {})
-    timed = res.get("timed_5min", {})
-    print(
-        f"{name}: sample100 acc={s100.get('overall_accuracy')} "
-        f"p50_ms={s100.get('latency_stats', {}).get('p50_ms')} | "
-        f"timed n={timed.get('n_ok')} elapsed={timed.get('elapsed_seconds')} "
-        f"qps={timed.get('throughput_qps')} acc={timed.get('overall_accuracy')}"
-    )
+    s100 = res.get("sample_100") or {}
+    timed = res.get("timed") or res.get("timed_5min") or {}
+    full = res.get("full_bea60k") or {}
+    bits = [f"{name}:"]
+    if s100:
+        bits.append(
+            f"sample100 acc={s100.get('overall_accuracy')} "
+            f"p50_ms={s100.get('latency_stats', {}).get('p50_ms')}"
+        )
+    if timed:
+        bits.append(
+            f"timed n={timed.get('n_ok')} elapsed={timed.get('elapsed_seconds')} "
+            f"qps={timed.get('throughput_qps')} acc={timed.get('overall_accuracy')} "
+            f"p50_ms={timed.get('latency_stats', {}).get('p50_ms')} "
+            f"p99_ms={timed.get('latency_stats', {}).get('p99_ms')}"
+        )
+    if full:
+        bits.append(
+            f"full_bea60k n={full.get('n_ok')} elapsed={full.get('elapsed_seconds')} "
+            f"qps={full.get('throughput_qps')} acc={full.get('overall_accuracy')} "
+            f"p50_ms={full.get('latency_stats', {}).get('p50_ms')} "
+            f"p99_ms={full.get('latency_stats', {}).get('p99_ms')}"
+        )
+    print(" | ".join(bits))
 PY
 
 status "collecting artifacts"

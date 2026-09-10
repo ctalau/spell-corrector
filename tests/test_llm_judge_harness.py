@@ -137,12 +137,18 @@ def test_llm_judge_setup_requires_torch25_cu124_and_gemma4():
 
     cu128 wheels fall back to CPU on Community hosts with a CUDA 12.4 driver.
     Pinning transformers>=5.5,<5.15 on image torch 2.4 is not enough: 5.14.1
-    still hard-imports DTensor.
+    still hard-imports DTensor. Unbounded torch>=2.5.1 pulled 2.6.0+cu124,
+    which skipped venv nvidia-cudnn-cu12 and failed libcudnn.so.9.
     """
     root = Path(__file__).resolve().parents[1]
     setup = (root / "scripts/runpod/setup_llm_judge.sh").read_text()
-    assert '"torch>=2.5.1"' in setup
+    assert '"torch==2.5.1"' in setup
     assert "https://download.pytorch.org/whl/cu124" in setup
+    assert "--ignore-installed" in setup
+    assert "nvidia-cudnn-cu12" in setup
+    assert "LD_LIBRARY_PATH" in setup
+    assert "libcudnn.so.9" in setup
+    assert "llm-judge-env.sh" in setup
     assert "from torch.distributed.tensor import DTensor" in setup
     assert "transformers.models.gemma4" in setup
     assert '"transformers>=5.5"' in setup
@@ -154,6 +160,8 @@ def test_llm_judge_setup_requires_torch25_cu124_and_gemma4():
     bootstrap = (root / "scripts/runpod/bootstrap_llm_judge.sh").read_text()
     assert "torch>=2.5" in bootstrap
     assert "cu124" in bootstrap
+    assert "llm-judge-env.sh" in bootstrap
+    assert "LD_LIBRARY_PATH" in bootstrap
     launch = (root / "scripts/runpod/launch.py").read_text()
     assert (
         'LLM_JUDGE_IMAGE = "runpod/pytorch:2.4.0-py3.11-cuda12.4.1-devel-ubuntu22.04"'
@@ -161,6 +169,8 @@ def test_llm_judge_setup_requires_torch25_cu124_and_gemma4():
     )
     report = (root / "reports/EXPERIMENT_LLM_JUDGE.md").read_text()
     assert "runpod/pytorch:2.4.0-py3.11-cuda12.4.1-devel-ubuntu22.04" in report
-    assert "torch>=2.5.1+cu124" in report
+    assert "torch==2.5.1+cu124" in report
     assert "`transformers>=5.5`" in report
     assert "rwfef0kegboxvk" in report
+    assert "9cfvu6gcwn11ks" in report
+    assert "libcudnn.so.9" in report

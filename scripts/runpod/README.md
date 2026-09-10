@@ -28,9 +28,11 @@ See [reports/FROZEN_ENCODER.md](../../reports/FROZEN_ENCODER.md).
 
 LLM-judge / Gemma-4 (`--bootstrap-path scripts/runpod/bootstrap_llm_judge.sh`)
 also defaults to that **cu124 / py3.11** image. `setup_llm_judge.sh` then
-installs `torch>=2.5.1+cu124` (so `torch.distributed.tensor.DTensor` exists)
-and `transformers>=5.5`. Do not pass a cu128 image or cu128 wheels: Community
-hosts with a CUDA 12.4 driver fall back to CPU. See
+installs `torch==2.5.1+cu124` (so `torch.distributed.tensor.DTensor` exists),
+force-installs `nvidia-cudnn-cu12` into the venv, and writes
+`/workspace/llm-judge-env.sh` (`LD_LIBRARY_PATH` for `libcudnn.so.9`).
+Bootstrap sources that file. Do not pass a cu128 image or cu128 wheels:
+Community hosts with a CUDA 12.4 driver fall back to CPU. See
 [reports/EXPERIMENT_LLM_JUDGE.md](../../reports/EXPERIMENT_LLM_JUDGE.md).
 
 ## Where the setup time went

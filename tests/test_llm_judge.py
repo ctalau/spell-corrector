@@ -115,3 +115,29 @@ def test_select_by_edit_distance_and_probability_handles_missing_word():
     ranked = select_by_edit_distance_and_probability(candidates, "stroe")
     assert ranked[0]["word"] == "store"
     assert ranked[-1]["word"] is None
+
+
+def test_select_by_edit_distance_and_probability_drops_candidates_that_echo_the_typo():
+    # Regression test: a candidate identical to the typo has edit_distance 0,
+    # which used to let it beat a real correction on any near-tied logprob
+    # (observed live: gemma-4-E2B-it echoed "ugry" unchanged instead of "ugly"
+    # despite "ugly" having the better logprob). Such candidates must be
+    # dropped before scoring, not merely outscored.
+    candidates = [
+        {"word": "ugry", "logprob": -0.73, "n_tokens": 3},  # echoes the typo verbatim
+        {"word": "ugly", "logprob": -0.70, "n_tokens": 2},  # the real, slightly more likely correction
+    ]
+    ranked = select_by_edit_distance_and_probability(candidates, "ugry", edit_distance_weight=1.0)
+    assert [c["word"] for c in ranked] == ["ugly"]
+
+
+def test_select_by_edit_distance_and_probability_case_insensitive_echo_check():
+    candidates = [{"word": "Store", "logprob": -0.1, "n_tokens": 1}]
+    ranked = select_by_edit_distance_and_probability(candidates, "store")
+    assert ranked == []
+
+
+def test_select_by_edit_distance_and_probability_empty_when_only_echo_candidates():
+    candidates = [{"word": "stroe", "logprob": -0.1, "n_tokens": 1}]
+    ranked = select_by_edit_distance_and_probability(candidates, "stroe")
+    assert ranked == []

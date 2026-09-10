@@ -339,13 +339,23 @@ def select_by_edit_distance_and_probability(
     candidates: list[dict], typo: str, *, edit_distance_weight: float = 1.0
 ) -> list[dict]:
     """Score each beam candidate as `logprob - weight * edit_distance(word,
-    typo)` and return the candidates sorted best-first (best = argmax). Edit
-    distance is to the *typo*, not the gold correction (unknown at inference
-    time) -- a cheap noisy-channel-style prior that a genuine correction is
-    usually a small number of edits from the misspelling."""
+    typo)` and return the surviving candidates sorted best-first (best =
+    argmax). Edit distance is to the *typo*, not the gold correction (unknown
+    at inference time) -- a cheap noisy-channel-style prior that a genuine
+    correction is usually a small number of edits from the misspelling, given
+    a weight rather than used as an absolute decider on its own.
+
+    A candidate identical to the typo (case-insensitive) is dropped before
+    scoring, not merely disadvantaged: it is not a correction at all, and its
+    edit distance of 0 would otherwise let it beat a real correction on any
+    near-tied logprob -- the exact failure mode this word list is built to
+    avoid, not a byproduct of `edit_distance_weight` to be tuned away."""
+    typo_n = typo.strip().lower()
     scored = []
     for cand in candidates:
         word = cand.get("word")
+        if word is not None and word.strip().lower() == typo_n:
+            continue
         dist = edit_distance(word, typo) if word is not None else None
         score = (cand["logprob"] - edit_distance_weight * dist) if dist is not None else float("-inf")
         scored.append({**cand, "edit_distance": dist, "combined_score": score})

@@ -69,9 +69,55 @@ from spelling_reranker.llm_judge_cpu import (
 )
 
 
-def build_eligible_errors(errors: list[dict], hunspell, max_candidates: int) -> tuple[list[dict], dict]:
-    """Attach Hunspell suggestions to every error; cache suggest() by typo."""
-    cache: dict[str, tuple[bool, list[str]]] = {}
+def _suggestion_cache_key(hunspell) -> str:
+    """Identity of the dictionary the cached suggestions came from.
+
+    BEA-60K is a locked benchmark, so a stale cache would silently change what
+    is being measured. Keying on the .dic/.aff hashes means a different or
+    updated dictionary simply misses the cache instead of being scored against
+    another dictionary's suggestions.
+    """
+    hashes = hunspell.metadata().get("dictionary_hashes", {})
+    return json.dumps({name: entry.get("sha256") for name, entry in sorted(hashes.items())}, sort_keys=True)
+
+
+def load_suggestion_cache(path: Path | None, hunspell) -> dict[str, tuple[bool, list[str]]]:
+    """Per-typo (flagged, suggestions) memo from a previous run, if it matches."""
+    if path is None or not path.is_file():
+        return {}
+    try:
+        payload = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        return {}
+    if payload.get("dictionary_key") != _suggestion_cache_key(hunspell):
+        return {}
+    return {typo: (bool(flagged), list(sugg)) for typo, (flagged, sugg) in payload.get("entries", {}).items()}
+
+
+def save_suggestion_cache(path: Path | None, hunspell, cache: dict[str, tuple[bool, list[str]]]) -> None:
+    if path is None:
+        return
+    path.parent.mkdir(parents=True, exist_ok=True)
+    payload = {
+        "dictionary_key": _suggestion_cache_key(hunspell),
+        "hunspell_metadata": hunspell.metadata(),
+        "entries": {typo: [flagged, sugg] for typo, (flagged, sugg) in cache.items()},
+    }
+    tmp = path.with_suffix(path.suffix + ".tmp")
+    tmp.write_text(json.dumps(payload), encoding="utf-8")
+    tmp.replace(path)
+
+
+def build_eligible_errors(
+    errors: list[dict], hunspell, max_candidates: int, cache: dict | None = None
+) -> tuple[list[dict], dict]:
+    """Attach Hunspell suggestions to every error; memoize suggest() by typo.
+
+    `cache` is that memo, passed in so a caller can persist it: the pass over
+    all ~68k BEA errors costs minutes and is identical on every run, while the
+    scored sample is usually 100 examples.
+    """
+    cache = {} if cache is None else cache
     n_flagged = 0
     for err in errors:
         typo = err["typo"]
@@ -293,6 +339,19 @@ def main() -> int:
     parser.add_argument("--bea-dir", type=Path, default=ROOT / "data" / "bea60k")
     parser.add_argument("--output", type=Path, required=True)
     parser.add_argument("--seed", type=int, default=1337)
+    parser.add_argument(
+        "--suggestion-cache",
+        type=Path,
+        default=ROOT / "data" / "bea60k" / "hunspell_suggestions.json",
+        help="per-typo Hunspell spell()/suggest() memo, reused across runs. Keyed on the "
+        "dictionary's .dic/.aff hashes, so a different dictionary misses rather than "
+        "silently reusing another one's suggestions. Lives beside the (untracked) BEA files.",
+    )
+    parser.add_argument(
+        "--no-suggestion-cache",
+        action="store_true",
+        help="always re-query Hunspell for every BEA error and do not write the cache",
+    )
     parser.add_argument("--n-samples", type=int, default=100)
     parser.add_argument("--time-budget-seconds", type=float, default=300.0)
     parser.add_argument("--max-candidates", type=int, default=8)
@@ -336,7 +395,19 @@ def main() -> int:
     pairs = load_bea_pairs(args.bea_dir)
     errors = extract_word_errors(pairs)
     hunspell = default_engine()
-    errors, hunspell_meta = build_eligible_errors(errors, hunspell, args.max_candidates)
+    cache_path = None if args.no_suggestion_cache else args.suggestion_cache
+    suggestion_cache = load_suggestion_cache(cache_path, hunspell)
+    n_cached = len(suggestion_cache)
+    t_hunspell0 = time.perf_counter()
+    errors, hunspell_meta = build_eligible_errors(errors, hunspell, args.max_candidates, suggestion_cache)
+    hunspell_seconds = time.perf_counter() - t_hunspell0
+    if len(suggestion_cache) > n_cached:
+        save_suggestion_cache(cache_path, hunspell, suggestion_cache)
+    print(
+        f"hunspell pass {hunspell_seconds:.1f}s "
+        f"({n_cached} typos from cache, {len(suggestion_cache) - n_cached} newly queried)",
+        flush=True,
+    )
 
     eligible = [i for i, e in enumerate(errors) if e["hunspell_flagged"] and e["candidates"]]
     if not eligible:
@@ -368,6 +439,8 @@ def main() -> int:
         "bea_n_word_errors": hunspell_meta["n_word_errors"],
         "bea_n_hunspell_flagged": hunspell_meta["n_hunspell_flagged"],
         "bea_n_eligible": len(eligible),
+        "hunspell_pass_seconds": hunspell_seconds,
+        "hunspell_cache_hits": n_cached,
         "hunspell_metadata": hunspell.metadata(),
         "python": platform.python_version(),
     }

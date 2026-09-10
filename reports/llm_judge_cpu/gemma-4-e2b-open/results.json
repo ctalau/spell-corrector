@@ -1,0 +1,77 @@
+{
+  "model_id": "google/gemma-4-E2B-it",
+  "model_name": "gemma-4-e2b-open",
+  "seed": 1337,
+  "n_samples": 100,
+  "time_budget_seconds": 300.0,
+  "max_candidates": 8,
+  "max_new_tokens": 8,
+  "dtype": "auto",
+  "answer_mode": "open",
+  "bea_n_word_errors": 68429,
+  "bea_n_hunspell_flagged": 67877,
+  "bea_n_eligible": 67844,
+  "hunspell_metadata": {
+    "hunspell_cli_version": "@(#) International Ispell Version 3.2.06 (but really Hunspell 1.7.2)",
+    "python_binding": "/usr/local/lib/python3.11/dist-packages/hunspell.cpython-311-x86_64-linux-gnu.so",
+    "dictionary_package": "hunspell-en-us",
+    "dictionary_paths": {
+      "dic": "/usr/share/hunspell/en_US.dic",
+      "aff": "/usr/share/hunspell/en_US.aff"
+    },
+    "dictionary_hashes": {
+      "en_US.dic": {
+        "path": "/usr/share/hunspell/en_US.dic",
+        "sha256": "829a043cf078d1e80e886289a13823454977f442a239a859d2133ea61944aa60",
+        "size": 860381
+      },
+      "en_US.aff": {
+        "path": "/usr/share/hunspell/en_US.aff",
+        "sha256": "70fe5778717d097ce2f3326baaa5c1e4d2206d81a5a81d3ea8e11c4770806dd5",
+        "size": 3131
+      }
+    },
+    "os": {
+      "system": "Linux",
+      "release": "6.18.44-fc-v24",
+      "platform": "Linux-6.18.44-fc-v24-x86_64-with-glibc2.39",
+      "python": "3.11.15"
+    }
+  },
+  "python": "3.11.15",
+  "load_seconds": 261.60252668,
+  "load_class": "AutoModelForMultimodalLM",
+  "device": "cpu",
+  "torch_version": "2.14.0+cpu",
+  "transformers_version": "5.17.0",
+  "supports_system_role": true,
+  "supports_enable_thinking": true,
+  "warmup_latency_s": 258.123563719,
+  "sample_100": {
+    "n_requested": 100,
+    "n_ok": 100,
+    "n_errors_raised": 0,
+    "n_no_answer": 0,
+    "elapsed_seconds": 1079.9077326309998,
+    "throughput_qps": 0.09260050370819005,
+    "overall_accuracy": 0.9,
+    "conditional_accuracy": 0.963855421686747,
+    "n_gold_in_pool": 83,
+    "hunspell_top1_accuracy_on_sample": 0.59,
+    "n_chosen_outside_pool": 16,
+    "n_chosen_outside_pool_correct": 10,
+    "accuracy_when_gold_outside_pool": 0.5882352941176471,
+    "latency_stats": {
+      "n": 100,
+      "mean_ms": 10796.865325179993,
+      "stdev_ms": 2186.3374607722167,
+      "min_ms": 7880.94787,
+      "p50_ms": 10211.64931349972,
+      "p90_ms": 13932.420827899865,
+      "p95_ms": 14872.458807699899,
+      "p99_ms": 17033.630392799827,
+      "max_ms": 17041.433453999616
+    }
+  },
+  "timed_5min": null
+}

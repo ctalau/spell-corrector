@@ -29,6 +29,12 @@ dependencies = [
 
 [project.optional-dependencies]
 dev = ["pytest>=8.0", "pytest-timeout>=2.3"]
+# scripts/llm_judge_bea60k_cpu.py only -- not needed for the trained reranker.
+# Needs transformers >=5 for Qwen3.5/Gemma-4's AutoModelForMultimodalLM class,
+# which exceeds the core `transformers>=4.48,<5` pin above (that pin is for
+# scripts/llm_judge_bea60k.py's GPU track, validated on transformers 4.x/early
+# 5.x with a pinned torch/cudnn combination this CPU track does not share).
+llm-judge-cpu = ["transformers>=4.57", "accelerate>=0.34"]
 
 [tool.setuptools.packages.find]
 include = ["spelling_reranker*"]

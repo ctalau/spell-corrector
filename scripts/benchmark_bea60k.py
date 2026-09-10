@@ -8,7 +8,6 @@ import csv
 import json
 import sys
 from collections import Counter
-from difflib import SequenceMatcher
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -16,56 +15,12 @@ if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
 from spelling_reranker.aspell import AspellEngine, aspell_metadata
+from spelling_reranker.bea60k import extract_word_errors, load_bea_pairs
 from spelling_reranker.byte_encoding import N_CANDIDATE_SLOTS, nfc
 from spelling_reranker.candidates import build_pool, pad_pool
 from spelling_reranker.hunspell import default_engine
 from spelling_reranker.inference import load_model_dir, predict_indices
 from spelling_reranker.serialization import MAX_CANDIDATE_BYTES
-
-
-def align_errors(noisy: str, clean: str) -> list[dict]:
-    n_toks = noisy.split()
-    c_toks = clean.split()
-    matcher = SequenceMatcher(a=n_toks, b=c_toks, autojunk=False)
-    errors: list[dict] = []
-    for tag, i1, i2, j1, j2 in matcher.get_opcodes():
-        if tag != "replace":
-            continue
-        n_span = n_toks[i1:i2]
-        c_span = c_toks[j1:j2]
-        if len(n_span) == 1 and len(c_span) == 1:
-            left = " ".join(n_toks[:i1])
-            right = " ".join(n_toks[i2:])
-            if left:
-                left += " "
-            if right:
-                right = " " + right
-            errors.append(
-                {
-                    "typo": n_span[0],
-                    "gold": c_span[0],
-                    "context_before": left,
-                    "context_after": right,
-                    "noisy_sentence": noisy,
-                    "clean_sentence": clean,
-                }
-            )
-    return errors
-
-
-def load_bea_pairs(bea_dir: Path) -> list[tuple[str, str]]:
-    clean_path = bea_dir / "test.bea60k"
-    noise_path = bea_dir / "test.bea60k.noise"
-    if not clean_path.is_file() or not noise_path.is_file():
-        raise FileNotFoundError(
-            f"BEA files missing in {bea_dir}. Run scripts/download_bea60k.py"
-        )
-    cleans = clean_path.read_text(encoding="utf-8", errors="replace").splitlines()
-    noises = noise_path.read_text(encoding="utf-8", errors="replace").splitlines()
-    if len(cleans) != len(noises):
-        raise ValueError(f"line count mismatch: clean={len(cleans)} noise={len(noises)}")
-    return list(zip(noises, cleans))
-
 
 HIST_KEYS = [
     *[str(i) for i in range(N_CANDIDATE_SLOTS)],
@@ -134,9 +89,7 @@ def main() -> int:
     args = parser.parse_args()
 
     pairs = load_bea_pairs(args.bea_dir)
-    errors: list[dict] = []
-    for noisy, clean in pairs:
-        errors.extend(align_errors(noisy, clean))
+    errors = extract_word_errors(pairs)
     if args.max_examples is not None:
         errors = errors[: args.max_examples]
     n = len(errors)

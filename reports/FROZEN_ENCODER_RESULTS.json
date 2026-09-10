@@ -1,0 +1,147 @@
+{
+  "date": "2026-09-10",
+  "pod": "k9x8j2kl9dultm",
+  "commit": "287b43d680e66e2498e70b1616c6da1fadcdb053",
+  "cost_usd": 0.3778,
+  "elapsed_hours": 1.1112,
+  "final_status": "FAILED: experiment rc=1",
+  "metrics": {
+    "H0": {
+      "overall": 0.8111,
+      "cond": 0.8169,
+      "overall_pct": 81.11,
+      "cond_pct": 81.69
+    },
+    "H1_scalar": {
+      "arm": "scalar",
+      "hidden_size": 768,
+      "n_candidates": 10,
+      "scaler": {
+        "length_mean": 0.09696736931800842,
+        "length_std": 0.9499987363815308,
+        "encoder_scale": 0.9307356756750857
+      },
+      "trainable_parameters": 20353,
+      "learning_rate": 0.001,
+      "seed": 1337,
+      "stop_reason": "bea-gate: overall -0.0090 cond -0.0110 not greater than 0.01",
+      "nan_seen": false,
+      "steps": 386,
+      "best_val_conditional_accuracy": 0.7888888868225945,
+      "best_val_loss": 0.5505540772544013,
+      "last_val": {
+        "loss": 0.5505540772544013,
+        "conditional_accuracy": 0.7888888868225945,
+        "conditional_top3": 0.9380000003178914,
+        "n": 4500
+      },
+      "h0_dpair": {
+        "n": 4532,
+        "n_conditional": 4500,
+        "coverage": 0.9929390997352162,
+        "overall_accuracy": 0.8111209179170344,
+        "conditional_accuracy": 0.8168888888888889,
+        "conditional_top3": 0.0,
+        "hunspell_top1_overall": 0.8111209179170344,
+        "hunspell_top1_conditional": 0.8168888888888889,
+        "retention": 1.0,
+        "rescue": 0.0,
+        "serialization_failures": 0,
+        "loss": null
+      },
+      "best_bea1k_overall": 0.524,
+      "best_bea1k_conditional": 0.6413708690330477,
+      "bea_gate_fired": true,
+      "duration_sec": 20.340559244155884,
+      "output_dir": "artifacts/frozen/heads/scalar"
+    },
+    "H2_linear": {
+      "arm": "linear",
+      "hidden_size": 768,
+      "n_candidates": 10,
+      "scaler": {
+        "length_mean": 0.09696736931800842,
+        "length_std": 0.9499987363815308,
+        "encoder_scale": 0.9307356756750857
+      },
+      "trainable_parameters": 11563,
+      "learning_rate": 0.0003,
+      "seed": 1337,
+      "stop_reason": "patience 2 on d-pair conditional accuracy",
+      "nan_seen": true,
+      "steps": 0,
+      "best_val_conditional_accuracy": 0.0,
+      "best_val_loss": null,
+      "last_val": {
+        "loss": null,
+        "conditional_accuracy": 0.0,
+        "conditional_top3": 0.0,
+        "n": 0
+      },
+      "h0_dpair": {
+        "n": 4532,
+        "n_conditional": 4500,
+        "coverage": 0.9929390997352162,
+        "overall_accuracy": 0.8111209179170344,
+        "conditional_accuracy": 0.8168888888888889,
+        "conditional_top3": 0.0,
+        "hunspell_top1_overall": 0.8111209179170344,
+        "hunspell_top1_conditional": 0.8168888888888889,
+        "retention": 1.0,
+        "rescue": 0.0,
+        "serialization_failures": 0,
+        "loss": null
+      },
+      "best_bea1k_overall": 0.354,
+      "best_bea1k_conditional": 0.43329253365973075,
+      "bea_gate_fired": false,
+      "duration_sec": 47.099316358566284,
+      "output_dir": "artifacts/frozen/heads/linear"
+    },
+    "H3_mlp": {
+      "arm": "mlp",
+      "hidden_size": 768,
+      "n_candidates": 10,
+      "scaler": {
+        "length_mean": 0.09696736931800842,
+        "length_std": 0.9499987363815308,
+        "encoder_scale": 0.9307356756750857
+      },
+      "trainable_parameters": 1003393,
+      "learning_rate": 0.0003,
+      "seed": 1337,
+      "stop_reason": "patience 2 on d-pair conditional accuracy",
+      "nan_seen": true,
+      "steps": 0,
+      "best_val_conditional_accuracy": 0.0,
+      "best_val_loss": null,
+      "last_val": {
+        "loss": null,
+        "conditional_accuracy": 0.0,
+        "conditional_top3": 0.0,
+        "n": 0
+      },
+      "h0_dpair": {
+        "n": 4532,
+        "n_conditional": 4500,
+        "coverage": 0.9929390997352162,
+        "overall_accuracy": 0.8111209179170344,
+        "conditional_accuracy": 0.8168888888888889,
+        "conditional_top3": 0.0,
+        "hunspell_top1_overall": 0.8111209179170344,
+        "hunspell_top1_conditional": 0.8168888888888889,
+        "retention": 1.0,
+        "rescue": 0.0,
+        "serialization_failures": 0,
+        "loss": null
+      },
+      "best_bea1k_overall": 0.323,
+      "best_bea1k_conditional": 0.3953488372093023,
+      "bea_gate_fired": false,
+      "duration_sec": 57.97239351272583,
+      "output_dir": "artifacts/frozen/heads/mlp"
+    },
+    "H3_mlp_bea1k": null
+  },
+  "conclusion": "Frozen ModernBERT pilot did not beat Hunspell. H1 scalar BEA-1k peaked at 52.4%/64.1% then stopped by >1pp gate. H2/H3 hit non-finite features/loss. H0 d-pair remains ~81%. Admission to full-data expansion is not met."
+}

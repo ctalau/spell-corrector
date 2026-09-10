@@ -3,6 +3,13 @@
 # with transformers/accelerate. Skips the WikiText download and the heavier
 # pandas/pyarrow stack that scripts/runpod/setup.sh installs for the trained
 # reranker's training-data pipeline -- this experiment builds no training data.
+#
+# Documented image: runpod/pytorch:2.4.0-py3.11-cuda12.4.1-devel-ubuntu22.04
+# (Python 3.11 so hunspell==0.5.5 builds; image torch 2.4.1). Cannot use the
+# frozen-encoder pin transformers>=4.48,<5: Gemma-4 (model_type gemma4) landed
+# in 5.5. Cannot leave the upper bound open: 5.15+ requires torch>=2.5 and
+# disables PyTorch on this image (same failure class as the frozen-encoder
+# pin). Pin transformers>=5.5,<5.15.
 set -uo pipefail
 
 REPO_DIR="${REPO_DIR:-/workspace/spell-corrector}"
@@ -87,8 +94,35 @@ pip_install /tmp/pip-build.log "setuptools<60" wheel cython || die "pip build de
 pip_install /tmp/hunspell-pip.log --no-build-isolation --force-reinstall hunspell==0.5.5 \
   || die "hunspell pip install into ${PYTHON}"
 "$PYTHON" -m pip show hunspell || die "pip show hunspell"
-pip_install /tmp/pip-transformers.log -U "transformers>=4.57" "accelerate>=0.34" \
+# Gemma-4 needs 5.5; 5.15+ disables torch 2.4. Do not use -U without an
+# upper bound (that pulled 5.17.0 on pod 4305piaz5i6i5s).
+pip_install /tmp/pip-transformers.log "transformers>=5.5,<5.15" "accelerate>=0.34" \
   || die "pip transformers/accelerate"
+
+log "transformers / AutoModel import check"
+"$PYTHON" - <<'PY' || die "transformers cannot import torch/AutoModel"
+import torch
+import transformers
+from transformers import AutoModel, AutoTokenizer
+from transformers.utils import is_torch_available
+
+print("torch", torch.__version__)
+print("transformers", transformers.__version__)
+parts = transformers.__version__.split(".")
+major, minor = int(parts[0]), int(parts[1])
+assert is_torch_available(), (
+    f"transformers disabled PyTorch; this image has {torch.__version__}. "
+    "Pin transformers>=5.5,<5.15 (Gemma-4 landed in 5.5; 5.15+ needs torch>=2.5)."
+)
+assert (major, minor) < (5, 15), (
+    f"transformers {transformers.__version__} requires PyTorch >= 2.5; "
+    f"this image has {torch.__version__}. "
+    "Pin transformers>=5.5,<5.15 (Gemma-4 landed in 5.5)."
+)
+assert AutoModel is not None and AutoTokenizer is not None
+assert getattr(transformers, "AutoModelForMultimodalLM", None) is not None
+print("AutoModel / AutoModelForMultimodalLM import ok")
+PY
 
 log "hunspell import check"
 "$PYTHON" - <<'PY' || die "import hunspell"
@@ -98,13 +132,17 @@ PY
 
 log "verifying"
 "$PYTHON" - <<'PY' || die "verify"
-import torch, transformers
+import torch
+import transformers
+from transformers import AutoModel
 from spelling_reranker.hunspell import default_engine
+
 print("torch", torch.__version__, "cuda avail", torch.cuda.is_available())
 print("transformers", transformers.__version__)
 if not torch.cuda.is_available():
     raise SystemExit("CUDA is not available; refusing to continue")
 print("gpu", torch.cuda.get_device_name(0))
+assert AutoModel is not None
 engine = default_engine()
 assert engine.suggest("recieve"), "hunspell returned no suggestions"
 print("hunspell suggest('recieve') ->", engine.suggest("recieve"))

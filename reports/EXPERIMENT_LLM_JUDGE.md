@@ -123,6 +123,8 @@ charts (fixed-sample and timed-run separately).
 
 ## Reproducing
 
+Default (sample of 100, then a 5-minute wrapping timed pass):
+
 ```bash
 python scripts/download_bea60k.py
 python scripts/llm_judge_bea60k.py \
@@ -136,7 +138,46 @@ python scripts/llm_judge_bea60k.py \
     --bea-dir data/bea60k --output reports/llm_judge/minicpm5-1b
 ```
 
-On a GPU pod, `scripts/runpod/bootstrap_llm_judge.sh` runs both automatically (see
-`scripts/runpod/launch.py --bootstrap-path scripts/runpod/bootstrap_llm_judge.sh
---env MODEL_A_ID=... --env MODEL_B_ID=...`); this run instead used the CLI directly
-on the local CPU box since `RUNPOD_KEY` was not available.
+`--time-budget-seconds 3600` is the primary longer-run mode: it scores as many
+eligible examples as fit in one hour and writes overall/conditional accuracy,
+Hunspell top-1 on the same set, latency p50/p99/mean, throughput, `n_ok`, and
+elapsed time to `results.json` (`timed`, with `timed_5min` kept as an alias).
+`--skip-sample` drops the 100-example phase so the hour is spent on the timed
+pass. `--full` is optional: one non-wrapping pass over the shuffled eligible
+set as `full_bea60k` (still honor a time budget; this is not an unbounded
+full-BEA requirement). Progress is logged every 500 examples; predictions are
+checkpointed every 2000.
+
+### Full Gemma on Runpod (1 hour, Gemma-only)
+
+Cheapest planned GPU: Community RTX A4000 (~$0.17/hr). Bootstrap skips the
+100-sample + 5-min combo when `TIME_BUDGET_SECONDS` is not `300`, and skips
+model B when `MODEL_B_ID` is `none` / empty. Single timed phase at 3600s:
+
+```bash
+python scripts/runpod/launch.py \
+  --name llm-judge-gemma-1h \
+  --bootstrap-path scripts/runpod/bootstrap_llm_judge.sh \
+  --branch cursor/llm-judge-1h-gemma-ff25 \
+  --gpu "NVIDIA RTX A4000" \
+  --max-price 0.20 \
+  --disk-gb 40 \
+  --env MODEL_A_ID=google/gemma-4-E2B-it \
+  --env MODEL_A_NAME=gemma-4-e2b \
+  --env MODEL_B_ID=none \
+  --env TIME_BUDGET_SECONDS=3600
+```
+
+Optional: add `--env FULL_BEA=1` for a non-wrapping pass over the eligible set
+(still capped at 1h). Add `--env ALSO_SAMPLE=1` if you want sample-100 first,
+then the 1h timed/full phase. After the run, fetch artifacts and terminate:
+
+```bash
+python scripts/runpod/fetch_artifacts.py <pod-id> --dest .
+python scripts/runpod/terminate.py --all
+```
+
+Monitor `https://<pod-id>-8000.proxy.runpod.net/{run.log,STATUS,DONE}`.
+On a GPU pod, `scripts/runpod/bootstrap_llm_judge.sh` otherwise still defaults
+to Qwen then Gemma with the original 100-sample + 300s timed pair. The CPU
+numbers in this report used the CLI directly on the local box.

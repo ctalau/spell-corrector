@@ -10,10 +10,12 @@ results. Requires torch + transformers + a GPU; run on Runpod
 
 from __future__ import annotations
 
+import argparse
+import random
 import re
 import time
 from dataclasses import dataclass
-from typing import Sequence
+from typing import Mapping, Sequence
 
 SYSTEM_PROMPT = (
     "You are an expert English spelling-correction assistant. You will be "
@@ -25,6 +27,145 @@ SYSTEM_PROMPT = (
 )
 
 _NUMBER_RE = re.compile(r"\d+")
+DEFAULT_TIME_BUDGET_SECONDS = 300.0
+DEFAULT_N_SAMPLES = 100
+DEFAULT_PROGRESS_EVERY = 500
+DEFAULT_CHECKPOINT_EVERY = 2000
+
+
+@dataclass(frozen=True)
+class JudgePhase:
+    """One scoring pass over a (possibly wrapped) list of eligible error indices."""
+
+    name: str
+    indices: tuple[int, ...]
+    time_budget_seconds: float | None
+    max_examples: int | None
+    wrap: bool
+    predictions_stem: str
+
+
+def eligible_indices(errors: Sequence[Mapping]) -> list[int]:
+    """Indices Hunspell flagged that also have at least one suggestion."""
+    return [i for i, err in enumerate(errors) if err.get("hunspell_flagged") and err.get("candidates")]
+
+
+def shuffle_indices(indices: Sequence[int], seed: int) -> list[int]:
+    order = list(indices)
+    random.Random(seed).shuffle(order)
+    return order
+
+
+def build_llm_judge_parser() -> argparse.ArgumentParser:
+    parser = argparse.ArgumentParser(
+        description=(
+            "LLM-judge experiment on the locked BEA-60K benchmark. "
+            "Prompts a small instruction-tuned LLM to pick the best Hunspell "
+            "suggestion for each BEA-60K word error, and measures per-call latency."
+        ),
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+    )
+    parser.add_argument("--model-id", required=True, help="HF model id, e.g. Qwen/Qwen3.5-0.8B")
+    parser.add_argument("--model-name", required=True, help="short label for output paths/reports")
+    parser.add_argument("--bea-dir", type=str, default=None)
+    parser.add_argument("--output", type=str, required=True)
+    parser.add_argument("--seed", type=int, default=1337)
+    parser.add_argument("--n-samples", type=int, default=DEFAULT_N_SAMPLES)
+    parser.add_argument(
+        "--time-budget-seconds",
+        type=float,
+        default=None,
+        help=(
+            "Wall-clock budget for the timed/full phase. Default "
+            f"{DEFAULT_TIME_BUDGET_SECONDS:.0f}s unless --full (no cap). "
+            "Pass 3600 for a 1-hour run; 0 or negative means unbounded."
+        ),
+    )
+    parser.add_argument(
+        "--full",
+        action="store_true",
+        help=(
+            "Score the shuffled eligible set once (no wrap) as phase full_bea60k. "
+            "Skips the 100-sample and wrapping timed phases unless --also-sample. "
+            "Honors --time-budget-seconds when set (e.g. 3600); otherwise no wall-clock cap."
+        ),
+    )
+    parser.add_argument(
+        "--also-sample",
+        action="store_true",
+        help="With --full or --skip-sample, still run the fixed --n-samples phase first.",
+    )
+    parser.add_argument(
+        "--skip-sample",
+        action="store_true",
+        help="Skip the fixed n-samples phase; run only the timed/full phase.",
+    )
+    parser.add_argument("--max-candidates", type=int, default=8)
+    parser.add_argument("--max-new-tokens", type=int, default=8)
+    parser.add_argument("--dtype", default="auto", help="'auto' -> bfloat16 (memory-safe on CPU too)")
+    parser.add_argument("--progress-every", type=int, default=DEFAULT_PROGRESS_EVERY)
+    parser.add_argument("--checkpoint-every", type=int, default=DEFAULT_CHECKPOINT_EVERY)
+    return parser
+
+
+def parse_llm_judge_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
+    return build_llm_judge_parser().parse_args(None if argv is None else list(argv))
+
+
+def resolve_time_budget(args: argparse.Namespace) -> float | None:
+    raw = getattr(args, "time_budget_seconds", None)
+    if raw is not None:
+        return None if raw <= 0 else float(raw)
+    if getattr(args, "full", False):
+        return None
+    return DEFAULT_TIME_BUDGET_SECONDS
+
+
+def plan_phases(args: argparse.Namespace, eligible_order: Sequence[int]) -> list[JudgePhase]:
+    """Decide which scoring phases to run. Does not load a model."""
+    order = tuple(eligible_order)
+    n_samples = max(0, int(getattr(args, "n_samples", DEFAULT_N_SAMPLES)))
+    run_sample = n_samples > 0 and (
+        getattr(args, "also_sample", False)
+        or (not getattr(args, "full", False) and not getattr(args, "skip_sample", False))
+    )
+    budget = resolve_time_budget(args)
+    phases: list[JudgePhase] = []
+    if run_sample:
+        sample = order[:n_samples]
+        phases.append(
+            JudgePhase(
+                name="sample_100",
+                indices=sample,
+                time_budget_seconds=None,
+                max_examples=len(sample),
+                wrap=False,
+                predictions_stem="sample100",
+            )
+        )
+    if getattr(args, "full", False):
+        phases.append(
+            JudgePhase(
+                name="full_bea60k",
+                indices=order,
+                time_budget_seconds=budget,
+                max_examples=None,
+                wrap=False,
+                predictions_stem="full",
+            )
+        )
+    else:
+        phases.append(
+            JudgePhase(
+                name="timed",
+                indices=order,
+                time_budget_seconds=budget,
+                max_examples=None,
+                wrap=budget is not None,
+                predictions_stem="timed",
+            )
+        )
+    return phases
 
 
 def build_messages(

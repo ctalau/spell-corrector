@@ -49,6 +49,16 @@ GPU_PREFERENCE = [
 
 #: Ships CUDA torch, so setup.sh never downloads a torch wheel.
 DEFAULT_IMAGE = "runpod/pytorch:1.0.2-cu1281-torch280-ubuntu2404"
+#: Frozen selector: Python 3.11 so hunspell==0.5.5 builds (setuptools<60), and
+#: transformers 4.48.x so ModernBERT imports on the image's torch 2.4.1.
+#: Do not use the cu128 / py3.12 / torch 2.8 image until hunspell works on 3.12.
+FROZEN_IMAGE = "runpod/pytorch:2.4.0-py3.11-cuda12.4.1-devel-ubuntu22.04"
+#: LLM-judge / Gemma-4: same py3.11 + CUDA 12.4 host image (hunspell). Image
+#: torch is 2.4.1; setup_llm_judge.sh upgrades the venv to torch==2.5.1+cu124
+#: (DTensor) and force-installs nvidia-cudnn-cu12 so libcudnn.so.9 resolves.
+#: Never the cu128 / py3.12 image -- those wheels fall back to CPU on
+#: Community CUDA 12.4 hosts.
+LLM_JUDGE_IMAGE = "runpod/pytorch:2.4.0-py3.11-cuda12.4.1-devel-ubuntu22.04"
 
 
 def api(path: str, method: str = "GET", payload: dict | None = None) -> dict | list:
@@ -69,18 +79,29 @@ def api(path: str, method: str = "GET", payload: dict | None = None) -> dict | l
 
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--name", default="spell-corrector-train")
-    parser.add_argument("--image", default=DEFAULT_IMAGE)
-    parser.add_argument("--disk-gb", type=int, default=80)
+    parser.add_argument("--name", default=None)
+    parser.add_argument(
+        "--image",
+        default=None,
+        help=(
+            "Pod image. Frozen and LLM-judge default is the cu124/py3.11 "
+            "image (hunspell). LLM-judge then pip-installs torch==2.5.1+cu124 "
+            "plus nvidia-cudnn-cu12 for Gemma-4 / DTensor. Do not pass the "
+            "cu128/py3.12 torch 2.8 image for frozen or LLM-judge."
+        ),
+    )
+    parser.add_argument("--disk-gb", type=int, default=None)
     parser.add_argument("--gpu", action="append", default=None, help="GPU type id (repeatable)")
-    parser.add_argument("--max-price", type=float, default=0.80, help="USD/hr ceiling")
+    parser.add_argument("--max-price", type=float, default=None, help="USD/hr ceiling")
     parser.add_argument("--wait", type=int, default=600, help="seconds to wait for RUNNING")
     parser.add_argument("--repo-url", default="https://github.com/ctalau/spell-corrector")
     parser.add_argument("--branch", default="main")
     parser.add_argument("--commit", default=None, help="exact revision (default: branch head)")
-    parser.add_argument("--target-train", type=int, default=3_000_000)
-    parser.add_argument("--target-valid", type=int, default=60_000)
-    parser.add_argument("--config", default="configs/train_full.yaml")
+    parser.add_argument("--target-train", type=int, default=None)
+    parser.add_argument("--target-valid", type=int, default=None)
+    parser.add_argument("--experiment", choices=("byte", "frozen"), default="byte",
+                        help="byte-level reranker, or frozen ModernBERT selector")
+    parser.add_argument("--config", default=None)
     parser.add_argument("--idle", action="store_true", help="do not auto-run the experiment")
     parser.add_argument(
         "--bootstrap-path",
@@ -95,6 +116,59 @@ def main() -> int:
         help="extra environment variable for the pod, repeatable",
     )
     args = parser.parse_args()
+
+    if args.config is None:
+        args.config = (
+            "configs/train_frozen_modernbert.yaml"
+            if args.experiment == "frozen"
+            else "configs/train_full.yaml"
+        )
+    elif "frozen" in Path(args.config).name:
+        args.experiment = "frozen"
+
+    frozen = args.experiment == "frozen"
+    llm_judge = Path(args.bootstrap_path).name == "bootstrap_llm_judge.sh"
+    if args.image is None:
+        if frozen:
+            args.image = FROZEN_IMAGE
+        elif llm_judge:
+            args.image = LLM_JUDGE_IMAGE
+        else:
+            args.image = DEFAULT_IMAGE
+    elif (frozen or llm_judge) and (
+        "torch280" in args.image
+        or "py3.12" in args.image
+        or "ubuntu2404" in args.image
+        or "cu128" in args.image
+    ):
+        needed = FROZEN_IMAGE if frozen else LLM_JUDGE_IMAGE
+        print(
+            "warning: cu128/py3.12 images cannot build hunspell==0.5.5 "
+            "(setuptools<60 / ImpImporter) and cu128 torch falls back to "
+            f"CPU on CUDA 12.4 hosts. This run needs {needed}",
+            file=sys.stderr,
+        )
+    if args.name is None:
+        args.name = "spell-corrector-frozen" if frozen else "spell-corrector-train"
+    if args.disk_gb is None:
+        args.disk_gb = 100 if frozen else 80
+    if args.max_price is None:
+        args.max_price = 0.40 if frozen else 0.80
+    if args.target_train is None:
+        args.target_train = 400_000 if frozen else 3_000_000
+    if args.target_valid is None:
+        args.target_valid = 40_000 if frozen else 60_000
+    gpu_preference = (
+        [
+            "NVIDIA RTX A5000",
+            "NVIDIA GeForce RTX 4090",
+            "NVIDIA GeForce RTX 3090",
+            "NVIDIA A40",
+            "NVIDIA L40S",
+        ]
+        if frozen
+        else GPU_PREFERENCE
+    )
 
     # Pin to an exact commit rather than the branch name. raw.githubusercontent
     # caches branch paths for minutes, so a freshly pushed fix is not
@@ -121,7 +195,7 @@ def main() -> int:
             raise SystemExit(f"--env expects KEY=VALUE, got {item!r}")
         extra_env[key] = value
 
-    gpus = args.gpu or GPU_PREFERENCE
+    gpus = args.gpu or gpu_preference
     payload = {
         "name": args.name,
         "imageName": args.image,
@@ -140,6 +214,7 @@ def main() -> int:
             "TARGET_TRAIN": str(args.target_train),
             "TARGET_VALID": str(args.target_valid),
             "CONFIG": args.config,
+            "EXPERIMENT": args.experiment,
             **extra_env,
         },
     }
@@ -179,6 +254,8 @@ def main() -> int:
         payload["dockerStartCmd"] = []
         print(f"commit:    {commit}")
         print(f"bootstrap: {bootstrap_url}")
+        print(f"experiment:{args.experiment} config={args.config}")
+        print(f"image:     {args.image}")
     print(f"creating pod over {gpus} (<= ${args.max_price}/hr)...")
     pod = api("/pods", "POST", payload)
     pod_id = pod.get("id")

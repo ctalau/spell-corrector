@@ -12,6 +12,7 @@ from pathlib import Path
 from typing import Sequence
 
 from spelling_reranker.byte_encoding import N_CANDIDATE_SLOTS, nfc
+from spelling_reranker.candidates import first_ten_pool
 
 DEFAULT_DIC = Path("/usr/share/hunspell/en_US.dic")
 DEFAULT_AFF = Path("/usr/share/hunspell/en_US.aff")
@@ -114,13 +115,21 @@ class HunspellEngine:
     def spell(self, word: str) -> bool:
         return bool(self._handle.spell(nfc(word)))
 
-    def suggest(self, word: str) -> list[str]:
+    def suggest_raw(self, word: str) -> list[str]:
+        """Hunspell suggestions in engine order, before dedup or truncation."""
         raw = self._handle.suggest(nfc(word)) or []
         out: list[str] = []
-        seen: set[str] = set()
         for item in raw:
             if isinstance(item, bytes):
                 item = item.decode("utf-8", errors="replace")
+            out.append(item)
+        return out
+
+    def suggest(self, word: str) -> list[str]:
+        raw = self.suggest_raw(word)
+        out: list[str] = []
+        seen: set[str] = set()
+        for item in raw:
             normalized = nfc(item)
             if normalized in seen:
                 continue
@@ -129,6 +138,10 @@ class HunspellEngine:
             if len(out) >= self.max_candidates:
                 break
         return out
+
+    def first_ten(self, typo: str) -> list[str]:
+        """Raw first ten Hunspell suggestions, then NFC-dedup within that slice."""
+        return first_ten_pool(self.suggest_raw(typo))
 
     def candidates(self, typo: str) -> list[str]:
         return self.suggest(typo)[: self.max_candidates]

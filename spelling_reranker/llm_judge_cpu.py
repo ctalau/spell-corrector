@@ -208,12 +208,35 @@ def _prepare_inputs(loaded: LoadedModel, messages: list[dict]):
     return tok(prompt, return_tensors="pt", add_special_tokens=False).to(loaded.device)
 
 
-def generate_once(loaded: LoadedModel, messages: list[dict], *, max_new_tokens: int = 8) -> tuple[str, float]:
-    """Greedy-decode a short completion; returns (text, wall-clock seconds)."""
+def generate_once(
+    loaded: LoadedModel,
+    messages: list[dict],
+    *,
+    max_new_tokens: int = 8,
+    prompt_lookup_num_tokens: int = 0,
+) -> tuple[str, float]:
+    """Greedy-decode a short completion; returns (text, wall-clock seconds).
+
+    `prompt_lookup_num_tokens` > 0 turns on prompt-lookup speculative decoding:
+    at each step transformers drafts that many tokens by matching the last few
+    generated tokens against the prompt and copying what followed there, then
+    verifies the whole draft in a single forward pass, keeping the longest
+    prefix greedy decoding would have produced anyway. The output is therefore
+    identical to plain greedy decoding -- this is a speed setting, not a
+    behaviour setting -- and it pays off exactly when the answer copies the
+    prompt, which is what an answer mode that rewrites the input sentence does
+    (see reports/EXPERIMENT_LLM_JUDGE_CPU.md for the measured ~2-3x). It is
+    useless for the modes that emit a candidate number or a single word, since
+    there is nothing long enough to copy.
+    """
     import torch
 
     tok = loaded.tokenizer
     inputs = _prepare_inputs(loaded, messages)
+
+    extra = {}
+    if prompt_lookup_num_tokens:
+        extra["prompt_lookup_num_tokens"] = prompt_lookup_num_tokens
 
     if loaded.device.type == "cuda":
         torch.cuda.synchronize()
@@ -224,6 +247,7 @@ def generate_once(loaded: LoadedModel, messages: list[dict], *, max_new_tokens: 
             max_new_tokens=max_new_tokens,
             do_sample=False,
             pad_token_id=tok.pad_token_id if tok.pad_token_id is not None else tok.eos_token_id,
+            **extra,
         )
     if loaded.device.type == "cuda":
         torch.cuda.synchronize()

@@ -107,6 +107,7 @@ def run_phase(
     edit_distance_weight: float = 1.0,
     sentence_token_headroom: int = 32,
     sentence_max_new_tokens_cap: int = 320,
+    prompt_lookup_num_tokens: int = 0,
 ) -> dict:
     predictions: list[dict] = []
     latencies: list[float] = []
@@ -156,12 +157,19 @@ def run_phase(
             # that is wasteful for short sentences and still too small for
             # long ones.
             budget = max_new_tokens
+            # Prompt-lookup speculative decoding only helps a mode whose answer
+            # copies most of its prompt back, so it is enabled for sentence
+            # mode alone; it does not change what is generated (see
+            # generate_once), only how many forward passes that costs.
+            lookup = prompt_lookup_num_tokens if mode == "sentence" else 0
             if mode == "sentence":
                 sentence = err["context_before"] + err["typo"] + err["context_after"]
                 n_sentence_tokens = len(loaded.tokenizer(sentence, add_special_tokens=False)["input_ids"])
                 budget = min(n_sentence_tokens + sentence_token_headroom, sentence_max_new_tokens_cap)
             try:
-                text, latency = generate_once(loaded, messages, max_new_tokens=budget)
+                text, latency = generate_once(
+                    loaded, messages, max_new_tokens=budget, prompt_lookup_num_tokens=lookup
+                )
             except Exception as exc:  # noqa: BLE001
                 predictions.append({**_slim(err), "error": str(exc)})
                 continue
@@ -183,6 +191,7 @@ def run_phase(
                     "tag_parse_failed": corrected_sentence is None,
                     "replacement_span_tokens": span_tokens,
                     "max_new_tokens": budget,
+                    "prompt_lookup_num_tokens": lookup,
                 }
             elif mode == "open":
                 choice = None
@@ -305,6 +314,15 @@ def main() -> int:
     )
     parser.add_argument("--beam-width", type=int, default=3, help="only used by --answer-mode beam")
     parser.add_argument(
+        "--prompt-lookup-tokens",
+        type=int,
+        default=10,
+        help="only used by --answer-mode sentence: prompt-lookup speculative decoding draft "
+        "length. The rewritten sentence is mostly a copy of the prompt, so drafting that many "
+        "tokens from the prompt and verifying them in one forward pass cuts per-call latency "
+        "~2-3x with output identical to plain greedy decoding. 0 disables it.",
+    )
+    parser.add_argument(
         "--edit-distance-weight",
         type=float,
         default=1.0,
@@ -345,6 +363,7 @@ def main() -> int:
         "dtype": args.dtype,
         "answer_mode": args.answer_mode,
         "beam_width": args.beam_width if args.answer_mode == "beam" else None,
+        "prompt_lookup_tokens": args.prompt_lookup_tokens if args.answer_mode == "sentence" else None,
         "edit_distance_weight": args.edit_distance_weight if args.answer_mode == "beam" else None,
         "bea_n_word_errors": hunspell_meta["n_word_errors"],
         "bea_n_hunspell_flagged": hunspell_meta["n_hunspell_flagged"],
@@ -403,7 +422,12 @@ def main() -> int:
             warm_budget = min(
                 len(loaded.tokenizer(warm_sentence, add_special_tokens=False)["input_ids"]) + 32, 320
             )
-        _, warmup_latency = generate_once(loaded, warm_messages, max_new_tokens=warm_budget)
+        _, warmup_latency = generate_once(
+            loaded,
+            warm_messages,
+            max_new_tokens=warm_budget,
+            prompt_lookup_num_tokens=args.prompt_lookup_tokens if args.answer_mode == "sentence" else 0,
+        )
     meta["warmup_latency_s"] = warmup_latency
     print(f"loaded in {load_seconds:.1f}s (warmup call {warmup_latency * 1000:.0f}ms)", flush=True)
 
@@ -418,6 +442,7 @@ def main() -> int:
         max_examples=len(sample_100),
         beam_width=args.beam_width,
         edit_distance_weight=args.edit_distance_weight,
+        prompt_lookup_num_tokens=args.prompt_lookup_tokens,
     )
     write_latency_histogram(phase1["_latencies"], args.output, "sample100")
     (args.output / "predictions_sample100.jsonl").write_text(
@@ -442,6 +467,7 @@ def main() -> int:
             max_examples=None,
             beam_width=args.beam_width,
             edit_distance_weight=args.edit_distance_weight,
+            prompt_lookup_num_tokens=args.prompt_lookup_tokens,
         )
         write_latency_histogram(phase2["_latencies"], args.output, "timed")
         (args.output / "predictions_timed.jsonl").write_text(

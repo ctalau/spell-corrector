@@ -3,6 +3,13 @@
 # prompt-select the best Hunspell suggestion for BEA-60K word errors; see
 # scripts/llm_judge_bea60k.py and reports/EXPERIMENT_LLM_JUDGE.md.
 #
+# Gemma-4 (`google/gemma-4-E2B-it`) needs torch>=2.5 so
+# `from torch.distributed.tensor import DTensor` succeeds, built for CUDA
+# 12.4 (cu124). setup_llm_judge.sh installs torch>=2.5.1+cu124 into the
+# venv on the documented py3.11 / CUDA 12.4 image. Do not launch with a
+# cu128 image or cu128 wheels -- Community hosts with a CUDA 12.4 driver
+# then silently fall back to CPU.
+#
 # Runs as the container's entrypoint (see scripts/runpod/bootstrap.sh for why:
 # the controlling environment has outbound HTTPS only). Progress and results
 # are served over Runpod's HTTP proxy:

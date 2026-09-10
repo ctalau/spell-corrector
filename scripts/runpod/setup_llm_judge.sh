@@ -5,11 +5,20 @@
 # reranker's training-data pipeline -- this experiment builds no training data.
 #
 # Documented image: runpod/pytorch:2.4.0-py3.11-cuda12.4.1-devel-ubuntu22.04
-# (Python 3.11 so hunspell==0.5.5 builds; image torch 2.4.1). Cannot use the
-# frozen-encoder pin transformers>=4.48,<5: Gemma-4 (model_type gemma4) landed
-# in 5.5. Cannot leave the upper bound open: 5.15+ requires torch>=2.5 and
-# disables PyTorch on this image (same failure class as the frozen-encoder
-# pin). Pin transformers>=5.5,<5.15.
+# (Python 3.11 so hunspell==0.5.5 builds; host driver CUDA 12.4). Image torch
+# is 2.4.1 -- not enough for Gemma-4. Loading google/gemma-4-E2B-it walks
+# transformers.core_model_loading -> distributed.sharding_utils ->
+# `from torch.distributed.tensor import DTensor`. That export exists on
+# PyTorch >=2.5; torch 2.4 only has the older torch.distributed._tensor
+# path. transformers 5.14.1 still hard-imports it, so pinning
+# transformers>=5.5,<5.15 on image torch 2.4 (pod rwfef0kegboxvk) failed
+# at model load after BEA prep.
+#
+# This script upgrades the venv to torch>=2.5.1+cu124 *before* transformers.
+# Do not use cu128 wheels or the cu128 / py3.12 image: on Community hosts
+# whose driver is CUDA 12.4 those builds silently fall back to CPU.
+# After the torch upgrade, transformers can be >=5.5 (Gemma-4 landed in
+# 5.5; no 5.15 upper bound).
 set -uo pipefail
 
 REPO_DIR="${REPO_DIR:-/workspace/spell-corrector}"
@@ -85,7 +94,7 @@ assert torch.cuda.is_available(), "CUDA is not available in the venv"
 print("gpu", torch.cuda.get_device_name(0), "bf16", torch.cuda.is_bf16_supported())
 PY
 
-log "pip deps + hunspell + transformers into $VENV"
+log "pip deps + hunspell into $VENV"
 pip_install /tmp/pip-upgrade.log --upgrade pip || die "pip upgrade"
 pip_install /tmp/pip-deps.log \
   numpy matplotlib requests pytest \
@@ -94,33 +103,95 @@ pip_install /tmp/pip-build.log "setuptools<60" wheel cython || die "pip build de
 pip_install /tmp/hunspell-pip.log --no-build-isolation --force-reinstall hunspell==0.5.5 \
   || die "hunspell pip install into ${PYTHON}"
 "$PYTHON" -m pip show hunspell || die "pip show hunspell"
-# Gemma-4 needs 5.5; 5.15+ disables torch 2.4. Do not use -U without an
-# upper bound (that pulled 5.17.0 on pod 4305piaz5i6i5s).
-pip_install /tmp/pip-transformers.log "transformers>=5.5,<5.15" "accelerate>=0.34" \
+
+# Gemma-4 / DTensor needs torch>=2.5. Official Runpod catalog has no
+# py3.11 + cu124 image that already ships that, so install cu124 wheels
+# into the venv (never cu128). Skip the download if the image already
+# has a CUDA-available torch>=2.5 built for 12.4.
+log "torch>=2.5.1+cu124 (DTensor / Gemma-4)"
+if "$PYTHON" - <<'PY'
+import sys
+import torch
+
+ver = tuple(int(p) for p in torch.__version__.split("+", 1)[0].split(".")[:2])
+cuda = torch.version.cuda or ""
+print(
+    "pre-upgrade torch", torch.__version__,
+    "cuda", cuda,
+    "avail", torch.cuda.is_available(),
+    "file", torch.__file__,
+)
+if ver >= (2, 5) and cuda.startswith("12.4") and torch.cuda.is_available():
+    sys.exit(0)
+sys.exit(1)
+PY
+then
+  echo "venv already has CUDA-available torch>=2.5+cu124; skipping wheel download"
+else
+  pip_install /tmp/pip-torch.log --upgrade "torch>=2.5.1" \
+    --index-url https://download.pytorch.org/whl/cu124 \
+    || die "pip torch>=2.5.1+cu124"
+fi
+
+log "CUDA / DTensor check (venv torch after cu124 install)"
+"$PYTHON" - <<'PY' || die "CUDA-available torch>=2.5.1+cu124 / DTensor missing"
+import torch
+from torch.distributed.tensor import DTensor
+
+print("torch", torch.__version__, "file", torch.__file__)
+print("torch.version.cuda", torch.version.cuda)
+print("cuda avail", torch.cuda.is_available())
+ver = tuple(int(p) for p in torch.__version__.split("+", 1)[0].split(".")[:2])
+cuda = torch.version.cuda or ""
+assert ver >= (2, 5), (
+    f"need torch>=2.5 for torch.distributed.tensor.DTensor; got {torch.__version__}"
+)
+assert "cu128" not in torch.__version__, (
+    f"cu128 wheels fall back to CPU on CUDA 12.4 hosts; got {torch.__version__}"
+)
+assert cuda.startswith("12.4"), (
+    f"need a cu124 build (host driver is CUDA 12.4); torch.version.cuda={cuda!r}"
+)
+assert torch.cuda.is_available(), (
+    f"CUDA is not available after torch install; "
+    f"torch={torch.__version__} torch.version.cuda={cuda}"
+)
+print("DTensor", DTensor)
+print("gpu", torch.cuda.get_device_name(0), "bf16", torch.cuda.is_bf16_supported())
+PY
+
+# Gemma-4 needs 5.5. torch is now >=2.5 so 5.15+ is fine; do not pin <5.15.
+pip_install /tmp/pip-transformers.log "transformers>=5.5" "accelerate>=0.34" \
   || die "pip transformers/accelerate"
 
-log "transformers / AutoModel import check"
-"$PYTHON" - <<'PY' || die "transformers cannot import torch/AutoModel"
+log "transformers / DTensor / gemma4 import check"
+"$PYTHON" - <<'PY' || die "transformers cannot import DTensor/gemma4"
 import torch
 import transformers
+import transformers.models.gemma4
+from torch.distributed.tensor import DTensor
 from transformers import AutoModel, AutoTokenizer
+from transformers.models.gemma4.configuration_gemma4 import Gemma4Config
 from transformers.utils import is_torch_available
 
-print("torch", torch.__version__)
+print("torch", torch.__version__, "file", torch.__file__)
 print("transformers", transformers.__version__)
 parts = transformers.__version__.split(".")
 major, minor = int(parts[0]), int(parts[1])
 assert is_torch_available(), (
-    f"transformers disabled PyTorch; this image has {torch.__version__}. "
-    "Pin transformers>=5.5,<5.15 (Gemma-4 landed in 5.5; 5.15+ needs torch>=2.5)."
+    f"transformers disabled PyTorch; torch={torch.__version__}. "
+    "Need torch>=2.5.1+cu124 and transformers>=5.5."
 )
-assert (major, minor) < (5, 15), (
-    f"transformers {transformers.__version__} requires PyTorch >= 2.5; "
-    f"this image has {torch.__version__}. "
-    "Pin transformers>=5.5,<5.15 (Gemma-4 landed in 5.5)."
+assert (major, minor) >= (5, 5), (
+    f"transformers {transformers.__version__} is too old for Gemma-4 "
+    "(model_type gemma4 landed in 5.5)."
 )
 assert AutoModel is not None and AutoTokenizer is not None
 assert getattr(transformers, "AutoModelForMultimodalLM", None) is not None
+assert DTensor is not None
+assert Gemma4Config.model_type == "gemma4"
+print("DTensor", DTensor)
+print("gemma4", transformers.models.gemma4.__name__, "model_type", Gemma4Config.model_type)
 print("AutoModel / AutoModelForMultimodalLM import ok")
 PY
 

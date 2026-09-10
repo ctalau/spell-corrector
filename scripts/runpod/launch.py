@@ -53,6 +53,11 @@ DEFAULT_IMAGE = "runpod/pytorch:1.0.2-cu1281-torch280-ubuntu2404"
 #: transformers 4.48.x so ModernBERT imports on the image's torch 2.4.1.
 #: Do not use the cu128 / py3.12 / torch 2.8 image until hunspell works on 3.12.
 FROZEN_IMAGE = "runpod/pytorch:2.4.0-py3.11-cuda12.4.1-devel-ubuntu22.04"
+#: LLM-judge / Gemma-4: same py3.11 + CUDA 12.4 host image (hunspell). Image
+#: torch is 2.4.1; setup_llm_judge.sh upgrades the venv to torch>=2.5.1+cu124
+#: so `torch.distributed.tensor.DTensor` exists. Never the cu128 / py3.12
+#: image -- those wheels fall back to CPU on Community CUDA 12.4 hosts.
+LLM_JUDGE_IMAGE = "runpod/pytorch:2.4.0-py3.11-cuda12.4.1-devel-ubuntu22.04"
 
 
 def api(path: str, method: str = "GET", payload: dict | None = None) -> dict | list:
@@ -78,9 +83,10 @@ def main() -> int:
         "--image",
         default=None,
         help=(
-            "Pod image. Frozen default is the cu124/py3.11 image "
-            "(hunspell + transformers 4.48). Do not pass the cu128/py3.12 "
-            "torch 2.8 image for frozen until hunspell builds on 3.12."
+            "Pod image. Frozen and LLM-judge default is the cu124/py3.11 "
+            "image (hunspell). LLM-judge then pip-installs torch>=2.5.1+cu124 "
+            "for Gemma-4 / DTensor. Do not pass the cu128/py3.12 torch 2.8 "
+            "image for frozen or LLM-judge."
         ),
     )
     parser.add_argument("--disk-gb", type=int, default=None)
@@ -120,13 +126,25 @@ def main() -> int:
         args.experiment = "frozen"
 
     frozen = args.experiment == "frozen"
+    llm_judge = Path(args.bootstrap_path).name == "bootstrap_llm_judge.sh"
     if args.image is None:
-        args.image = FROZEN_IMAGE if frozen else DEFAULT_IMAGE
-    elif frozen and ("torch280" in args.image or "py3.12" in args.image or "ubuntu2404" in args.image):
+        if frozen:
+            args.image = FROZEN_IMAGE
+        elif llm_judge:
+            args.image = LLM_JUDGE_IMAGE
+        else:
+            args.image = DEFAULT_IMAGE
+    elif (frozen or llm_judge) and (
+        "torch280" in args.image
+        or "py3.12" in args.image
+        or "ubuntu2404" in args.image
+        or "cu128" in args.image
+    ):
+        needed = FROZEN_IMAGE if frozen else LLM_JUDGE_IMAGE
         print(
             "warning: cu128/py3.12 images cannot build hunspell==0.5.5 "
-            "(setuptools<60 / ImpImporter). Frozen runs need "
-            f"{FROZEN_IMAGE}",
+            "(setuptools<60 / ImpImporter) and cu128 torch falls back to "
+            f"CPU on CUDA 12.4 hosts. This run needs {needed}",
             file=sys.stderr,
         )
     if args.name is None:

@@ -150,7 +150,11 @@ checkpointed every 2000.
 
 ### Full Gemma on Runpod (1 hour, Gemma-only)
 
-GPU pods use `runpod/pytorch:2.4.0-py3.11-cuda12.4.1-devel-ubuntu22.04` with `transformers>=5.5,<5.15` (Gemma-4 needs 5.5; 5.15+ disables this image's torch 2.4.1).
+GPU pods use `runpod/pytorch:2.4.0-py3.11-cuda12.4.1-devel-ubuntu22.04` (Python 3.11 so `hunspell==0.5.5` builds; matches Community hosts whose driver is CUDA 12.4). `scripts/runpod/setup_llm_judge.sh` then pip-installs **`torch>=2.5.1+cu124`** into the venv and **`transformers>=5.5`** (no 5.15 cap).
+
+Gemma-4 (`google/gemma-4-E2B-it`, `model_type` `gemma4`, landed in transformers 5.5) loads through `core_model_loading` → `distributed.sharding_utils` → `from torch.distributed.tensor import DTensor`. That export exists on PyTorch ≥2.5; torch 2.4 only has `torch.distributed._tensor`. Pinning `transformers>=5.5,<5.15` on image torch 2.4.1 (pod `rwfef0kegboxvk`, transformers 5.14.1) still hard-imported DTensor and died at model load after BEA prep (`bea_n_eligible=67844`), with no timed-phase scores. Do **not** use cu128 wheels or `runpod/pytorch:1.0.2-cu1281-torch280-ubuntu2404`: on these CUDA 12.4 hosts they silently fall back to CPU. Setup aborts if CUDA is unavailable after the torch upgrade, and asserts the DTensor + `transformers.models.gemma4` imports succeed before the run starts.
+
+`scripts/runpod/launch.py --bootstrap-path scripts/runpod/bootstrap_llm_judge.sh` defaults to this cu124 / py3.11 image.
 
 Cheapest planned GPU: Community RTX A4000 (~$0.17/hr). Bootstrap skips the
 100-sample + 5-min combo when `TIME_BUDGET_SECONDS` is not `300`, and skips
@@ -160,7 +164,7 @@ model B when `MODEL_B_ID` is `none` / empty. Single timed phase at 3600s:
 python scripts/runpod/launch.py \
   --name llm-judge-gemma-1h \
   --bootstrap-path scripts/runpod/bootstrap_llm_judge.sh \
-  --branch cursor/llm-judge-1h-gemma-ff25 \
+  --image runpod/pytorch:2.4.0-py3.11-cuda12.4.1-devel-ubuntu22.04 \
   --gpu "NVIDIA RTX A4000" \
   --max-price 0.20 \
   --disk-gb 40 \

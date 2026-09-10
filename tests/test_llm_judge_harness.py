@@ -132,17 +132,35 @@ def test_sample_uses_all_eligible_when_n_samples_exceeds_pool():
     assert phases[0].max_examples == 2
 
 
-def test_llm_judge_setup_pins_transformers_for_torch24_and_gemma4():
-    """Regression: unbounded transformers>=4.57 pulled 5.17, which disables torch 2.4."""
-    pin = "transformers>=5.5,<5.15"
+def test_llm_judge_setup_requires_torch25_cu124_and_gemma4():
+    """Gemma-4 load imports DTensor from torch.distributed.tensor (torch>=2.5).
+
+    cu128 wheels fall back to CPU on Community hosts with a CUDA 12.4 driver.
+    Pinning transformers>=5.5,<5.15 on image torch 2.4 is not enough: 5.14.1
+    still hard-imports DTensor.
+    """
     root = Path(__file__).resolve().parents[1]
     setup = (root / "scripts/runpod/setup_llm_judge.sh").read_text()
-    assert f'"{pin}"' in setup
+    assert '"torch>=2.5.1"' in setup
+    assert "https://download.pytorch.org/whl/cu124" in setup
+    assert "from torch.distributed.tensor import DTensor" in setup
+    assert "transformers.models.gemma4" in setup
+    assert '"transformers>=5.5"' in setup
+    assert "transformers>=5.5,<5.15" not in setup
     assert "transformers>=4.57" not in setup
-    assert "cannot import torch/AutoModel" in setup
     assert "is_torch_available" in setup
     assert "AutoModelForMultimodalLM" in setup
     assert "runpod/pytorch:2.4.0-py3.11-cuda12.4.1-devel-ubuntu22.04" in setup
+    bootstrap = (root / "scripts/runpod/bootstrap_llm_judge.sh").read_text()
+    assert "torch>=2.5" in bootstrap
+    assert "cu124" in bootstrap
+    launch = (root / "scripts/runpod/launch.py").read_text()
+    assert (
+        'LLM_JUDGE_IMAGE = "runpod/pytorch:2.4.0-py3.11-cuda12.4.1-devel-ubuntu22.04"'
+        in launch
+    )
     report = (root / "reports/EXPERIMENT_LLM_JUDGE.md").read_text()
     assert "runpod/pytorch:2.4.0-py3.11-cuda12.4.1-devel-ubuntu22.04" in report
-    assert pin in report
+    assert "torch>=2.5.1+cu124" in report
+    assert "transformers>=5.5" in report
+    assert "transformers>=5.5,<5.15" not in report

@@ -45,10 +45,12 @@ from spelling_reranker.candidates import build_pool
 from spelling_reranker.hunspell import default_engine
 from spelling_reranker.llm_judge import (
     build_messages,
+    build_open_messages,
     generate_once,
     latency_stats,
     load_llm,
     parse_choice,
+    parse_open_word,
     write_latency_histogram,
 )
 
@@ -83,6 +85,7 @@ def run_phase(
     indices: list[int],
     errors: list[dict],
     *,
+    mode: str,
     max_new_tokens: int,
     time_budget_seconds: float | None,
     max_examples: int | None,
@@ -101,14 +104,23 @@ def run_phase(
             break
         err = errors[indices[i % n]]
         i += 1
-        messages = build_messages(err["context_before"], err["typo"], err["context_after"], err["candidates"])
+        if mode == "open":
+            messages = build_open_messages(
+                err["context_before"], err["typo"], err["context_after"], err["candidates"]
+            )
+        else:
+            messages = build_messages(err["context_before"], err["typo"], err["context_after"], err["candidates"])
         try:
             text, latency = generate_once(loaded, messages, max_new_tokens=max_new_tokens)
         except Exception as exc:  # noqa: BLE001
             predictions.append({**_slim(err), "error": str(exc)})
             continue
-        choice = parse_choice(text, len(err["candidates"]))
-        chosen_word = err["candidates"][choice - 1] if choice is not None else None
+        if mode == "open":
+            choice = None
+            chosen_word = parse_open_word(text)
+        else:
+            choice = parse_choice(text, len(err["candidates"]))
+            chosen_word = err["candidates"][choice - 1] if choice is not None else None
         correct = chosen_word is not None and nfc(chosen_word) == err["gold_n"]
         latencies.append(latency)
         predictions.append(
@@ -117,6 +129,8 @@ def run_phase(
                 "raw_output": text,
                 "choice_index": choice,
                 "chosen_word": chosen_word,
+                "chosen_word_in_pool": chosen_word is not None
+                and any(nfc(chosen_word) == nfc(c) for c in err["candidates"]),
                 "correct": correct,
                 "latency_s": latency,
             }
@@ -127,8 +141,16 @@ def run_phase(
     cond_pool = [p for p in predictions if p.get("gold_in_pool")]
     cond_correct = sum(1 for p in cond_pool if p.get("correct"))
     hunspell_top1_on_sample = sum(1 for p in predictions if p.get("hunspell_top1_ok"))
-    no_answer = sum(1 for p in predictions if p.get("choice_index") is None and "error" not in p)
+    no_answer = sum(1 for p in predictions if p.get("chosen_word") is None and "error" not in p)
     errors_raised = sum(1 for p in predictions if "error" in p)
+    # Only meaningful in "open" mode: how often the model stepped outside the
+    # shown Hunspell candidates, and whether doing so was correct -- this is
+    # what distinguishes "open" from "index" mode, where escaping the pool is
+    # impossible by construction.
+    outside_pool = [p for p in predictions if p.get("chosen_word") is not None and not p.get("chosen_word_in_pool")]
+    outside_pool_correct = sum(1 for p in outside_pool if p.get("correct"))
+    not_in_pool = [p for p in predictions if not p.get("gold_in_pool")]
+    not_in_pool_correct = sum(1 for p in not_in_pool if p.get("correct"))
     return {
         "n_requested": n_scored,
         "n_ok": len(latencies),
@@ -140,6 +162,9 @@ def run_phase(
         "conditional_accuracy": (cond_correct / len(cond_pool)) if cond_pool else None,
         "n_gold_in_pool": len(cond_pool),
         "hunspell_top1_accuracy_on_sample": (hunspell_top1_on_sample / n_scored) if n_scored else None,
+        "n_chosen_outside_pool": len(outside_pool),
+        "n_chosen_outside_pool_correct": outside_pool_correct,
+        "accuracy_when_gold_outside_pool": (not_in_pool_correct / len(not_in_pool)) if not_in_pool else None,
         "latency_stats": latency_stats(latencies),
         "predictions": predictions,
         "_latencies": latencies,
@@ -174,6 +199,14 @@ def main() -> int:
     parser.add_argument("--max-candidates", type=int, default=8)
     parser.add_argument("--max-new-tokens", type=int, default=8)
     parser.add_argument("--dtype", default="auto", help="'auto' -> bfloat16 (memory-safe on CPU too)")
+    parser.add_argument(
+        "--answer-mode",
+        choices=("index", "open"),
+        default="index",
+        help="'index': pick a candidate number (default). 'open': same prompt/candidates "
+        "shown as a hint, but the model may write any word, not just one of them.",
+    )
+    parser.add_argument("--skip-timed", action="store_true", help="only run the fixed n-samples phase")
     args = parser.parse_args()
 
     args.output.mkdir(parents=True, exist_ok=True)
@@ -206,6 +239,7 @@ def main() -> int:
         "max_candidates": args.max_candidates,
         "max_new_tokens": args.max_new_tokens,
         "dtype": args.dtype,
+        "answer_mode": args.answer_mode,
         "bea_n_word_errors": hunspell_meta["n_word_errors"],
         "bea_n_hunspell_flagged": hunspell_meta["n_hunspell_flagged"],
         "bea_n_eligible": len(eligible),
@@ -242,16 +276,23 @@ def main() -> int:
     # Warm up: first call pays for CUDA kernel compilation / cache warming and
     # is excluded from every latency stat below.
     warm_err = errors[sample_100[0]]
-    warm_messages = build_messages(
+    warm_builder = build_open_messages if args.answer_mode == "open" else build_messages
+    warm_messages = warm_builder(
         warm_err["context_before"], warm_err["typo"], warm_err["context_after"], warm_err["candidates"]
     )
     _, warmup_latency = generate_once(loaded, warm_messages, max_new_tokens=args.max_new_tokens)
     meta["warmup_latency_s"] = warmup_latency
     print(f"loaded in {load_seconds:.1f}s (warmup call {warmup_latency * 1000:.0f}ms)", flush=True)
 
-    print(f"phase 1: fixed sample of {len(sample_100)}", flush=True)
+    print(f"phase 1: fixed sample of {len(sample_100)} (mode={args.answer_mode})", flush=True)
     phase1 = run_phase(
-        loaded, sample_100, errors, max_new_tokens=args.max_new_tokens, time_budget_seconds=None, max_examples=len(sample_100)
+        loaded,
+        sample_100,
+        errors,
+        mode=args.answer_mode,
+        max_new_tokens=args.max_new_tokens,
+        time_budget_seconds=None,
+        max_examples=len(sample_100),
     )
     write_latency_histogram(phase1["_latencies"], args.output, "sample100")
     (args.output / "predictions_sample100.jsonl").write_text(
@@ -263,23 +304,32 @@ def main() -> int:
         flush=True,
     )
 
-    print(f"phase 2: timed run, budget {args.time_budget_seconds:.0f}s", flush=True)
-    phase2 = run_phase(
-        loaded, order, errors, max_new_tokens=args.max_new_tokens, time_budget_seconds=args.time_budget_seconds, max_examples=None
-    )
-    write_latency_histogram(phase2["_latencies"], args.output, "timed")
-    (args.output / "predictions_timed.jsonl").write_text(
-        "".join(json.dumps(p, ensure_ascii=False) + "\n" for p in phase2["predictions"]), encoding="utf-8"
-    )
-    print(
-        f"  n={phase2['n_ok']} elapsed={phase2['elapsed_seconds']:.1f}s "
-        f"qps={_fmt(phase2['throughput_qps'], '.2f')} accuracy={_fmt(phase2['overall_accuracy'], '.3f')}",
-        flush=True,
-    )
+    phase2 = None
+    if not args.skip_timed:
+        print(f"phase 2: timed run, budget {args.time_budget_seconds:.0f}s (mode={args.answer_mode})", flush=True)
+        phase2 = run_phase(
+            loaded,
+            order,
+            errors,
+            mode=args.answer_mode,
+            max_new_tokens=args.max_new_tokens,
+            time_budget_seconds=args.time_budget_seconds,
+            max_examples=None,
+        )
+        write_latency_histogram(phase2["_latencies"], args.output, "timed")
+        (args.output / "predictions_timed.jsonl").write_text(
+            "".join(json.dumps(p, ensure_ascii=False) + "\n" for p in phase2["predictions"]), encoding="utf-8"
+        )
+        print(
+            f"  n={phase2['n_ok']} elapsed={phase2['elapsed_seconds']:.1f}s "
+            f"qps={_fmt(phase2['throughput_qps'], '.2f')} accuracy={_fmt(phase2['overall_accuracy'], '.3f')}",
+            flush=True,
+        )
+        phase2.pop("predictions", None)
+        phase2.pop("_latencies", None)
 
-    for phase in (phase1, phase2):
-        phase.pop("predictions", None)
-        phase.pop("_latencies", None)
+    phase1.pop("predictions", None)
+    phase1.pop("_latencies", None)
 
     results = {**meta, "sample_100": phase1, "timed_5min": phase2}
     (args.output / "results.json").write_text(json.dumps(results, indent=2) + "\n", encoding="utf-8")

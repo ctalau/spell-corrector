@@ -1,8 +1,10 @@
 from spelling_reranker.llm_judge import (
     LATENCY_BIN_EDGES_MS,
     build_messages,
+    build_open_messages,
     latency_stats,
     parse_choice,
+    parse_open_word,
 )
 
 
@@ -44,3 +46,25 @@ def test_latency_stats_basic():
 def test_latency_bin_edges_are_sorted_and_open_ended():
     assert LATENCY_BIN_EDGES_MS == sorted(LATENCY_BIN_EDGES_MS)
     assert LATENCY_BIN_EDGES_MS[-1] == float("inf")
+
+
+def test_build_open_messages_shows_candidates_as_hint_not_constraint():
+    messages = build_open_messages("I went to the ", "stroe", " yesterday.", ["store", "strove"])
+    assert messages[0]["role"] == "system"
+    assert "not limited to the candidate list" in messages[0]["content"]
+    user = messages[1]["content"]
+    assert "<TYPO>stroe</TYPO>" in user
+    assert "1. store" in user
+
+
+def test_parse_open_word_extracts_first_word_token():
+    assert parse_open_word("store") == "store"
+    assert parse_open_word("The word is store.") == "The"
+    assert parse_open_word('"store"') == "store"
+    assert parse_open_word("well-known") == "well-known"
+    assert parse_open_word("don't") == "don't"
+
+
+def test_parse_open_word_none_when_no_word_found():
+    assert parse_open_word("") is None
+    assert parse_open_word("123") is None

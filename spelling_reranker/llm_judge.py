@@ -24,7 +24,24 @@ SYSTEM_PROMPT = (
     "Reply with ONLY the candidate number and nothing else."
 )
 
+#: Open-answer variant: the same Hunspell candidates are shown as a hint, but
+#: the model is free to write a different word instead of picking one of
+#: them. Used to measure how much the forced-choice-from-candidates format
+#: (SYSTEM_PROMPT above) itself caps accuracy, versus the model's own
+#: unconstrained spelling knowledge.
+SYSTEM_PROMPT_OPEN = (
+    "You are an expert English spelling-correction assistant. You will be "
+    "shown a sentence with one misspelled word marked <TYPO>...</TYPO>, and "
+    "a numbered list of candidate corrections from a spell-checker, in the "
+    "spell-checker's own ranked order, as a hint. Give the single best "
+    "corrected spelling for the marked word given the sentence context. You "
+    "are not limited to the candidate list -- if none of them are right, "
+    "write the correct word yourself. "
+    "Reply with ONLY the corrected word and nothing else."
+)
+
 _NUMBER_RE = re.compile(r"\d+")
+_WORD_RE = re.compile(r"[A-Za-z][A-Za-z'-]*")
 
 
 def build_messages(
@@ -42,6 +59,21 @@ def build_messages(
     ]
 
 
+def build_open_messages(
+    context_before: str, typo: str, context_after: str, candidates: Sequence[str]
+) -> list[dict]:
+    lines = [
+        f"Sentence: {context_before}<TYPO>{typo}</TYPO>{context_after}",
+        "Spell-checker candidates (hint, you may ignore these):",
+    ]
+    lines += [f"{i + 1}. {cand}" for i, cand in enumerate(candidates)]
+    lines.append("Answer with only the corrected word.")
+    return [
+        {"role": "system", "content": SYSTEM_PROMPT_OPEN},
+        {"role": "user", "content": "\n".join(lines)},
+    ]
+
+
 def parse_choice(text: str, n_candidates: int) -> int | None:
     """1-indexed candidate number parsed from free-form model output."""
     match = _NUMBER_RE.search(text)
@@ -49,6 +81,12 @@ def parse_choice(text: str, n_candidates: int) -> int | None:
         return None
     n = int(match.group())
     return n if 1 <= n <= n_candidates else None
+
+
+def parse_open_word(text: str) -> str | None:
+    """First word-like token from a free-form model output, or None."""
+    match = _WORD_RE.search(text)
+    return match.group() if match else None
 
 
 @dataclass

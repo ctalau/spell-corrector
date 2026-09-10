@@ -126,39 +126,64 @@ charts (fixed-sample and timed-run separately).
 gemma-4-E2B-it's index-mode result above (83.0% overall / 100% conditional) is
 capped by construction: 17 of the 100 sampled errors never had the gold correction
 anywhere in Hunspell's candidate list, so no forced choice among those candidates
-could ever get them right. `--answer-mode open` (`spelling_reranker/llm_judge.py`,
-`build_open_messages`/`parse_open_word`) tests the same fixed 100-sample subset,
-shows the same Hunspell candidates as a hint, but lets the model write any word
-instead of restricting it to picking one.
+could ever get them right. Two follow-up modes test the same fixed 100-sample
+subset with that constraint loosened or removed entirely:
 
-| | gemma-4-E2B-it, index mode | gemma-4-E2B-it, open mode |
-|---|---|---|
-| Overall accuracy | 83.0% | **90.0%** |
-| Conditional accuracy (gold was offered, 83/100) | 100% | 96.4% (80/83) |
-| Accuracy when gold was *not* offered (17/100) | 0% (impossible by construction) | **58.8% (10/17)** |
+- **`--answer-mode open`** (`build_open_messages`/`parse_open_word`): same Hunspell
+  candidates shown as a hint, but the model may write any word instead of being
+  restricted to picking one.
+- **`--answer-mode beam`** (`build_generative_messages`/`beam_word_candidates`/
+  `select_by_edit_distance_and_probability`): no Hunspell candidates shown at all.
+  The model's own beam search (width 3) generates up to 3 candidate words; each is
+  cut at its first word boundary and scored `logprob - weight * edit_distance(word,
+  typo)` (weight 1.0), and the top-scoring one is the answer. This replaces Hunspell
+  as the candidate generator entirely, using only the LLM plus a classic
+  noisy-channel-style edit-distance prior.
 
-Removing the constraint is a net +7pp: it recovers just over half of the
-previously-unreachable cases (10/17), at a small cost on the subset where the
-listed candidates already contained the answer (100% -> 96.4%, i.e. 3/83 cases
-where the model wrote something else despite a correct option being right there).
-A characteristic recovered example: typo "thursty" in "I had the worst thursty I
-have ever had" -- Hunspell's only candidates were "thirsty" and "hurst" (both
-wrong; the context calls for the noun "thirst", not the adjective "thirsty"), and
-gemma-4-E2B-it produced "thirst" directly from context despite it never appearing
-in the candidate list. Full predictions:
-`reports/llm_judge/gemma-4-e2b-open/predictions_sample100.jsonl`.
+| | Index (pick from list) | Open (list as hint, free answer) | Beam (no list, self-generated + edit-distance rerank) |
+|---|---|---|---|
+| Overall accuracy | 83.0% | **90.0%** | 87.0% |
+| Conditional accuracy (gold was offered, 83/100) | 100% | 96.4% (80/83) | 91.6% (76/83) |
+| Accuracy when gold was *not* offered (17/100) | 0% (impossible by construction) | 58.8% (10/17) | **64.7% (11/17)** |
 
-**Latency from this run is not comparable and is excluded from the table above on
-purpose.** It happened to run during a period of unusually slow disk I/O on this
-box: `low_cpu_mem_usage=True` loads the (already-bf16) checkpoint via mmap rather
-than copying it into RAM, so the *first* touch of each weight page during a
-forward pass faults it in from disk rather than RAM. Confirmed live via
-`/proc/<pid>/io` during the run: sustained reads of only ~5-6MB/s (this box's disk
-is otherwise capable of far more), driving the warmup call alone to 258s and
-per-example latency to a 10.2s median -- roughly 16x the 632ms median from the
-index-mode run of the same model on the same box. That gap is a disk-I/O artifact
-of this specific run, not a property of open- vs index-mode generation; a rerun
-under normal I/O should land close to the index-mode latency.
+Both follow-ups beat index mode overall by removing its hard ceiling. Open mode
+wins on total accuracy (90.0%), but beam mode -- despite getting *no* Hunspell hint
+at all -- recovers the most of the previously-unreachable cases (64.7% vs 58.8%),
+at the cost of being weaker on the "easy" gold-in-pool subset (91.6% vs 96.4%,
+unsurprising since it never sees Hunspell's list to fall back on). A characteristic
+open-mode recovery: typo "thursty" in "I had the worst thursty I have ever had" --
+Hunspell's only candidates were "thirsty" and "hurst" (both wrong; the context
+calls for the noun "thirst", not the adjective "thirsty"), and gemma-4-E2B-it
+produced "thirst" directly from context despite it never appearing in the
+candidate list.
+
+**A genuine flaw, not glossed over:** 2 of beam mode's 13 wrong answers are the
+model echoing the typo completely unchanged ("ugry" -> "ugry" instead of "ugly";
+"Miken" -> "Miken" instead of "McCain"). The scoring formula is structurally
+responsible: `edit_distance(word, typo)` is 0 when a beam candidate equals the
+typo itself, so the formula rewards *not correcting at all* whenever the
+logprob gap to a real correction is small (for "ugry": logprob -0.73 for the
+echoed typo vs -0.70 for "ugly" -- nearly tied on probability, but the +1 edit
+distance was enough to flip it). A straightforward fix is to exclude or heavily
+penalize candidates equal to the typo before reranking; not applied here so the
+result reported is the honest, unpatched one. Full predictions with all 3 beam
+candidates and their scores per example: `reports/llm_judge/{gemma-4-e2b-open,
+gemma-4-e2b-beam}/predictions_sample100.jsonl`.
+
+**Latency is not comparable across these three rows and is deliberately left out
+of the table.** The open-mode run happened to hit a period of unusually slow disk
+I/O on this box (`low_cpu_mem_usage=True` loads the already-bf16 checkpoint via
+mmap, so the *first* touch of each weight page during a forward pass faults it in
+from disk rather than RAM; confirmed live via `/proc/<pid>/io` at only ~5-6MB/s
+sustained), driving its median latency to 10.2s -- an I/O artifact, not a property
+of open-mode generation. The beam-mode run's page cache was warm (0 disk reads
+observed via the same `/proc/<pid>/io` check), so its 14.8s median is a real, if
+expensive, measurement of beam-width-3 generation cost on this CPU box -- roughly
+23x the index-mode run's 632ms median, more than the naive 3x-the-beams estimate
+would suggest, likely from Gemma4's hybrid sliding/full-attention layers and
+shared-KV bookkeeping not being especially optimized for batched beam search on
+CPU. Neither number should be read as "mode X is N times slower than mode Y" in
+general; both are one-off measurements on a noisy shared box.
 
 ## Reproducing
 
@@ -179,6 +204,12 @@ python scripts/llm_judge_bea60k.py \
     --model-id google/gemma-4-E2B-it --model-name gemma-4-e2b-open \
     --bea-dir data/bea60k --output reports/llm_judge/gemma-4-e2b-open \
     --answer-mode open --skip-timed
+
+# Beam-search ablation (same 100-sample subset, no Hunspell candidates at all):
+python scripts/llm_judge_bea60k.py \
+    --model-id google/gemma-4-E2B-it --model-name gemma-4-e2b-beam \
+    --bea-dir data/bea60k --output reports/llm_judge/gemma-4-e2b-beam \
+    --answer-mode beam --beam-width 3 --edit-distance-weight 1.0 --skip-timed
 ```
 
 On a GPU pod, `scripts/runpod/bootstrap_llm_judge.sh` runs both automatically (see

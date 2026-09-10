@@ -50,6 +50,7 @@ from spelling_reranker.bea60k import extract_word_errors, load_bea_pairs
 from spelling_reranker.byte_encoding import nfc
 from spelling_reranker.candidates import build_pool
 from spelling_reranker.hunspell import default_engine
+from spelling_reranker.llama_cpp_backend import load_llama_cpp
 from spelling_reranker.llm_judge_cpu import (
     beam_word_candidates,
     build_generative_messages,
@@ -210,12 +211,16 @@ def run_phase(
             lookup = prompt_lookup_num_tokens if mode == "sentence" else 0
             if mode == "sentence":
                 sentence = err["context_before"] + err["typo"] + err["context_after"]
-                n_sentence_tokens = len(loaded.tokenizer(sentence, add_special_tokens=False)["input_ids"])
-                budget = min(n_sentence_tokens + sentence_token_headroom, sentence_max_new_tokens_cap)
-            try:
-                text, latency = generate_once(
-                    loaded, messages, max_new_tokens=budget, prompt_lookup_num_tokens=lookup
+                budget = min(
+                    _count_tokens(loaded, sentence) + sentence_token_headroom, sentence_max_new_tokens_cap
                 )
+            try:
+                if hasattr(loaded, "generate"):  # llama.cpp backend
+                    text, latency = loaded.generate(messages, max_new_tokens=budget)
+                else:
+                    text, latency = generate_once(
+                        loaded, messages, max_new_tokens=budget, prompt_lookup_num_tokens=lookup
+                    )
             except Exception as exc:  # noqa: BLE001
                 predictions.append({**_slim(err), "error": str(exc)})
                 continue
@@ -316,6 +321,13 @@ def run_phase(
     }
 
 
+def _count_tokens(loaded, text: str) -> int:
+    """Token count from whichever backend is loaded (both tokenize natively)."""
+    if hasattr(loaded, "n_tokens"):  # llama.cpp backend, via the server's /tokenize
+        return loaded.n_tokens(text)
+    return len(loaded.tokenizer(text, add_special_tokens=False)["input_ids"])
+
+
 def _fmt(value, spec: str) -> str:
     return "n/a" if value is None else format(value, spec)
 
@@ -334,6 +346,25 @@ def _slim(err: dict) -> dict:
 
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
+    parser.add_argument(
+        "--backend",
+        choices=("transformers", "llama-cpp"),
+        default="transformers",
+        help="'transformers': the bf16 checkpoint through PyTorch (default). 'llama-cpp': a "
+        "quantized GGUF served by llama.cpp's llama-server -- far faster per call on CPU, but "
+        "quantization changes the model's answers, so accuracy must be re-measured rather than "
+        "carried over from a bf16 run.",
+    )
+    parser.add_argument("--gguf", type=Path, help="GGUF path (required for --backend llama-cpp)")
+    parser.add_argument(
+        "--llama-server-binary",
+        type=Path,
+        help="path to llama.cpp's llama-server binary (required for --backend llama-cpp)",
+    )
+    parser.add_argument("--llama-server-port", type=int, default=8080)
+    parser.add_argument(
+        "--llama-threads", type=int, default=None, help="llama-server -t; default lets llama.cpp choose"
+    )
     parser.add_argument("--model-id", required=True, help="HF model id, e.g. Qwen/Qwen3.5-0.8B")
     parser.add_argument("--model-name", required=True, help="short label for output paths/reports")
     parser.add_argument("--bea-dir", type=Path, default=ROOT / "data" / "bea60k")
@@ -390,6 +421,12 @@ def main() -> int:
     parser.add_argument("--skip-timed", action="store_true", help="only run the fixed n-samples phase")
     args = parser.parse_args()
 
+    if args.backend == "llama-cpp" and args.answer_mode == "beam":
+        raise SystemExit(
+            "--answer-mode beam needs per-token logprobs and beam search from transformers; "
+            "llama.cpp's server does not expose them. Use --backend transformers for beam mode."
+        )
+
     args.output.mkdir(parents=True, exist_ok=True)
 
     pairs = load_bea_pairs(args.bea_dir)
@@ -445,10 +482,20 @@ def main() -> int:
         "python": platform.python_version(),
     }
 
-    print(f"loading {args.model_id} ...", flush=True)
+    print(f"loading {args.model_id} via {args.backend} ...", flush=True)
     t_load0 = time.perf_counter()
     try:
-        loaded = load_llm(args.model_id, dtype=args.dtype)
+        if args.backend == "llama-cpp":
+            if not args.gguf or not args.llama_server_binary:
+                raise SystemExit("--backend llama-cpp requires --gguf and --llama-server-binary")
+            loaded = load_llama_cpp(
+                args.gguf,
+                server_binary=args.llama_server_binary,
+                port=args.llama_server_port,
+                n_threads=args.llama_threads,
+            )
+        else:
+            loaded = load_llm(args.model_id, dtype=args.dtype)
     except Exception as exc:  # noqa: BLE001
         (args.output / "results.json").write_text(
             json.dumps({**meta, "load_error": str(exc), "traceback": traceback.format_exc()}, indent=2) + "\n",
@@ -458,18 +505,23 @@ def main() -> int:
         return 1
     load_seconds = time.perf_counter() - t_load0
 
-    import torch
-    import transformers
-
     meta["load_seconds"] = load_seconds
     meta["load_class"] = loaded.load_class
     meta["device"] = str(loaded.device)
-    meta["torch_version"] = torch.__version__
-    meta["transformers_version"] = transformers.__version__
+    meta["backend"] = args.backend
     meta["supports_system_role"] = loaded.supports_system_role
     meta["supports_enable_thinking"] = loaded.supports_enable_thinking
-    if loaded.device.type == "cuda":
-        meta["gpu_name"] = torch.cuda.get_device_name(0)
+    if args.backend == "llama-cpp":
+        meta["llama_server"] = loaded.server_metadata
+        meta["gguf_path"] = str(args.gguf)
+    else:
+        import torch
+        import transformers
+
+        meta["torch_version"] = torch.__version__
+        meta["transformers_version"] = transformers.__version__
+        if loaded.device.type == "cuda":
+            meta["gpu_name"] = torch.cuda.get_device_name(0)
 
     # Warm up: first call pays for CUDA kernel compilation / cache warming and
     # is excluded from every latency stat below.
@@ -492,15 +544,16 @@ def main() -> int:
         warm_budget = args.max_new_tokens
         if args.answer_mode == "sentence":
             warm_sentence = warm_err["context_before"] + warm_err["typo"] + warm_err["context_after"]
-            warm_budget = min(
-                len(loaded.tokenizer(warm_sentence, add_special_tokens=False)["input_ids"]) + 32, 320
+            warm_budget = min(_count_tokens(loaded, warm_sentence) + 32, 320)
+        if hasattr(loaded, "generate"):
+            _, warmup_latency = loaded.generate(warm_messages, max_new_tokens=warm_budget)
+        else:
+            _, warmup_latency = generate_once(
+                loaded,
+                warm_messages,
+                max_new_tokens=warm_budget,
+                prompt_lookup_num_tokens=args.prompt_lookup_tokens if args.answer_mode == "sentence" else 0,
             )
-        _, warmup_latency = generate_once(
-            loaded,
-            warm_messages,
-            max_new_tokens=warm_budget,
-            prompt_lookup_num_tokens=args.prompt_lookup_tokens if args.answer_mode == "sentence" else 0,
-        )
     meta["warmup_latency_s"] = warmup_latency
     print(f"loaded in {load_seconds:.1f}s (warmup call {warmup_latency * 1000:.0f}ms)", flush=True)
 
@@ -556,6 +609,9 @@ def main() -> int:
 
     phase1.pop("predictions", None)
     phase1.pop("_latencies", None)
+
+    if hasattr(loaded, "stop"):
+        loaded.stop()
 
     results = {**meta, "sample_100": phase1, "timed_5min": phase2}
     (args.output / "results.json").write_text(json.dumps(results, indent=2) + "\n", encoding="utf-8")

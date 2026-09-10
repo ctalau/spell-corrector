@@ -86,10 +86,22 @@ class LlamaCppModel:
         out = _post(f"{self.base_url}/v1/chat/completions", payload, self.request_timeout)
         latency = time.perf_counter() - t0
         try:
-            text = out["choices"][0]["message"]["content"]
+            message = out["choices"][0]["message"]
         except (KeyError, IndexError) as exc:  # noqa: BLE001
             raise LlamaServerError(f"unexpected llama-server response: {out}") from exc
-        return text or "", latency
+        text = message.get("content") or ""
+        if not text and message.get("reasoning_content"):
+            # The model answered in thinking mode: llama.cpp put the chain of
+            # thought in reasoning_content and left content empty. Scoring the
+            # reasoning text as if it were the answer would quietly produce
+            # nonsense, so this is raised as the configuration error it is --
+            # the server needs `--reasoning off`, the equivalent of the
+            # transformers path's enable_thinking=False.
+            raise LlamaServerError(
+                "llama-server returned only reasoning_content (thinking mode is on); "
+                "start the server with --reasoning off"
+            )
+        return text, latency
 
     def stop(self) -> None:
         if self.process is not None and self.process.poll() is None:
@@ -139,8 +151,15 @@ def load_llama_cpp(
     n_ctx: int = 4096,
     extra_args: list[str] | None = None,
     startup_timeout_s: float = 300.0,
+    log_path: Path | None = None,
 ) -> LlamaCppModel:
-    """Spawn `llama-server` on the given GGUF and wait until it answers."""
+    """Spawn `llama-server` on the given GGUF and wait until it answers.
+
+    Server output goes to `log_path` (or is discarded), never to a pipe:
+    llama-server logs every request, and an undrained `subprocess.PIPE` blocks
+    the server as soon as the 64KB pipe buffer fills -- which looks exactly
+    like the model hanging mid-generation.
+    """
     if not Path(gguf_path).is_file():
         raise FileNotFoundError(f"GGUF not found: {gguf_path}")
     if not Path(server_binary).is_file():
@@ -152,6 +171,10 @@ def load_llama_cpp(
         "--host", host,
         "--port", str(port),
         "-c", str(n_ctx),
+        # Thinking off, matching the transformers path's enable_thinking=False.
+        # Left on, gemma-4 spends the whole generation budget on a chain of
+        # thought and returns an empty answer.
+        "--reasoning", "off",
         # One request at a time: the harness measures single-request latency,
         # not batched throughput, exactly as the transformers backend does.
         "-np", "1",
@@ -161,7 +184,12 @@ def load_llama_cpp(
     if extra_args:
         cmd += extra_args
 
-    process = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True)
+    if log_path is not None:
+        Path(log_path).parent.mkdir(parents=True, exist_ok=True)
+        log_handle = open(log_path, "w", encoding="utf-8")  # noqa: SIM115 - closed with the process
+    else:
+        log_handle = subprocess.DEVNULL
+    process = subprocess.Popen(cmd, stdout=log_handle, stderr=subprocess.STDOUT, text=True)
     base_url = f"http://{host}:{port}"
     try:
         props = wait_for_server(base_url, timeout_s=startup_timeout_s, process=process)
@@ -177,5 +205,6 @@ def load_llama_cpp(
             "model_path": str(gguf_path),
             "n_ctx": props.get("default_generation_settings", {}).get("n_ctx", n_ctx),
             "chat_template_from_gguf": bool(props.get("chat_template")),
+            "reasoning": "off",
         },
     )

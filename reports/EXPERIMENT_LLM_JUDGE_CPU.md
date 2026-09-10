@@ -331,6 +331,138 @@ Options (1) and (2) are the ones worth running next; both are cheap, and either
 would let the strict number be read directly instead of through a
 punctuation-insensitive lens.
 
+## Follow-up: making it fast -- prompt-lookup decoding, then q4_0 + llama.cpp
+
+Sentence mode's 5,980ms median (above) made iteration painful, so the cost was
+measured rather than guessed. Fitting latency against generated-token count over
+the 100-example run gives:
+
+```
+latency ≈ 0.64s fixed + 215ms per generated token   (bf16, transformers, 4 vCPU)
+```
+
+It is entirely decode-bound. Nothing ever hit the per-example token cap, so the
+budget was never the constraint -- the token *count* was: ~29 generated tokens per
+call versus ~1 in index mode. Two thirds of that is avoidable overhead: the tag
+names `<corrected_sentence>` and `</corrected_sentence>` cost 5 tokens each (10 of
+the 29), and the sentence body is a near-verbatim copy of text already sitting in
+the prompt, regenerated one token at a time at full model cost.
+
+### Fix 1: prompt-lookup speculative decoding (output-identical)
+
+Because the answer copies the prompt, transformers' `prompt_lookup_num_tokens`
+applies directly: draft N tokens by matching the tail of the generation against the
+prompt, verify the whole draft in one forward pass, keep the prefix greedy decoding
+would have produced anyway. It is a speed setting, not a behaviour setting -- the
+output is identical to plain greedy by construction.
+
+Measured in-process on 10-12 examples of the same sample:
+
+| Variant | Mean latency/call | Output identical to greedy |
+|---|---|---|
+| greedy (baseline) | 6.95s | -- |
+| lookup, draft 5 | 3.58s | 10/10 |
+| **lookup, draft 10** | **3.29s** | 10/10 |
+| lookup, draft 10, 3-grams | 3.20s | 10/10 |
+| lookup, draft 16 | 3.31s | 10/10 |
+| lookup, draft 24 | 3.36s | 10/10 |
+
+Gains plateau at a draft length of 10, which is the default; every setting tried
+reproduced greedy output exactly. Also tried and rejected: prefilling the opening
+tag into the assistant turn and stopping at `</` saves the 10 tag tokens (6.48s) but
+leaves a dangling `</` in the recovered word, and it is redundant once lookup is on
+-- lookup drafts the tag tokens from the prompt too. **These numbers are from a
+12-example micro-benchmark; the full 100-example rerun was interrupted, so the
+harness default is validated but not yet re-scored end-to-end at this setting.**
+
+### Fix 2: q4_0 GGUF served by llama.cpp (the current default for new runs)
+
+`--backend llama-cpp` (`spelling_reranker/llama_cpp_backend.py`) serves
+`google/gemma-4-E2B-it-qat-q4_0-gguf` -- Google's **quantization-aware-trained**
+q4_0 build, 3.35GB of text weights -- through `llama-server`, over its
+OpenAI-compatible endpoint. The GGUF's own chat template renders the prompt and the
+server's `/tokenize` sizes the per-example budget, so nothing is reconstructed from
+a second tokenizer.
+
+Unlike fix 1, **quantization changes the model's answers**, so all three portable
+answer modes were re-scored from scratch on the same fixed 100-example sample rather
+than inheriting the bf16 numbers:
+
+| Mode | bf16 strict | q4_0 strict | bf16 punct-insensitive | q4_0 punct-insensitive | bf16 p50 | q4_0 p50 |
+|---|---|---|---|---|---|---|
+| Index | 83.0% | 81.0% | 83.0% | 81.0% | 783ms&#42; | 744ms |
+| Open | 90.0% | 87.0% | 90.0% | 87.0% | (not comparable)&#42;&#42; | 960ms |
+| Sentence | 73.0% | 66.0% | 88.0% | 86.0% | 5,980ms | **2,118ms** |
+
+&#42; Same-box bf16 index rerun, not the earlier table's 632ms from another session.
+&#42;&#42; The bf16 open-mode run hit the disk-I/O stall documented above (10.2s median),
+so no honest speedup ratio can be quoted against it.
+
+**The trustworthy speedup is sentence mode's 2.8x** (5,980ms -> 2,118ms, both clean
+measurements on this box), and it beats fix 1's ~3.2s as well. Index mode gets
+nothing, for a good reason: it generates about one token, so its latency is almost
+all prompt processing, which quantization barely helps on CPU.
+
+**What q4_0 costs in accuracy is small but one-directional.** Per-example
+agreement with bf16 is 97% (index), 96% (open), 88% (sentence), and the discordant
+pairs go almost entirely one way:
+
+| Mode | bf16 wrong -> q4_0 right | bf16 right -> q4_0 wrong |
+|---|---|---|
+| Index | 0 | 2 (`commonder`->`commoner`, `dalls`->`dells`) |
+| Open | 0 | 3 (adds `shadowig`->`shadow`) |
+| Sentence | 2 | 9 |
+
+Sentence mode's 9 losses are again mostly the punctuation artifact, not worse
+spelling: `stupid?`, `colorful,`, `comfortable,`, `afraid,` are all correct
+corrections carrying adjacent punctuation, which is why the punctuation-insensitive
+number only moves 88.0% -> 86.0%. Its 2 wins are real (`Thanx` -> `Thanks`, which
+bf16 got wrong, and `Tenpura` -> `Tempura` without a stray quote). Zero wins on
+index and open across 200 examples is the honest signal here: q4_0 is slightly
+worse, by roughly 2-3 points, and n=100 puts that comfortably inside binomial noise
+in magnitude even though the direction is consistent.
+
+**Memory**, measured live rather than estimated:
+
+| | Peak RSS | Of which mmapped weights | Of which anonymous |
+|---|---|---|---|
+| bf16 / transformers | 6.12 GB | 4.77 GB | 0.87 GB |
+| q4_0 / llama-server (4096 ctx) | 4.81 GB | 3.27 GB | 1.54 GB |
+
+The bf16 figure is far below the ~10.2GB the checkpoint occupies on disk because
+`low_cpu_mem_usage=True` mmaps it and gemma-4-E2B-it's vision/audio towers are never
+touched by a text-only prompt. q4_0 saves 1.5GB of weights but spends some of it
+back on KV cache and compute buffers sized for a 4096-token context; a smaller `-c`
+would recover most of that.
+
+**One harness bug worth recording**, since it looked exactly like a model failure:
+`llama-server` was first spawned with `stdout=subprocess.PIPE` and nothing draining
+it, so the server blocked the moment the 64KB pipe buffer filled -- presenting as a
+119-second call returning an empty string. Server output now goes to a log file.
+Separately, gemma-4 defaults to thinking mode under llama.cpp, spending the entire
+budget on a chain of thought and returning empty `content`; the server is now started
+with `--reasoning off` (the equivalent of the transformers path's
+`enable_thinking=False`), and a response carrying only `reasoning_content` raises
+rather than being scored as if the reasoning were the answer.
+
+### Not portable to this backend
+
+Beam mode stays on the transformers backend and is rejected with an explicit error
+on `--backend llama-cpp`: it needs per-token logprobs and beam search, which
+`llama-server` does not expose. Prompt-lookup decoding is likewise transformers-only
+here -- llama.cpp's speculative decoding wants a draft model.
+
+### Side effect: the Hunspell pre-pass
+
+Independent of the model, every invocation re-queried Hunspell for all 68,429 BEA
+errors before the first model call -- about 13.5 minutes, deterministic, identical
+every run, to score 100 examples. That per-typo memo is now persisted between runs
+(`data/bea60k/hunspell_suggestions.json`, untracked), keyed on the dictionary's
+.dic/.aff hashes so an updated dictionary misses the cache instead of silently
+scoring the locked benchmark against different suggestions. Warm: **822s -> 0.3s**,
+which is what makes a full 100-example q4_0 run finish in about four minutes wall
+clock instead of twenty.
+
 ## Reproducing
 
 ```bash
@@ -362,6 +494,16 @@ python scripts/llm_judge_bea60k_cpu.py \
 python scripts/llm_judge_bea60k_cpu.py \
     --model-id google/gemma-4-E2B-it --model-name gemma-4-e2b-sentence \
     --bea-dir data/bea60k --output reports/llm_judge_cpu/gemma-4-e2b-sentence \
+    --answer-mode sentence --skip-timed
+
+# q4_0 GGUF via llama.cpp (the default backend for new runs; re-score, do not
+# assume the bf16 accuracy carries over):
+python scripts/llm_judge_bea60k_cpu.py \
+    --backend llama-cpp \
+    --gguf ~/.cache/huggingface/hub/models--google--gemma-4-E2B-it-qat-q4_0-gguf/snapshots/*/gemma-4-E2B_q4_0-it.gguf \
+    --llama-server-binary /path/to/llama.cpp/build/bin/llama-server --llama-threads 4 \
+    --model-id google/gemma-4-E2B-it-qat-q4_0-gguf --model-name gemma-4-e2b-q4-sentence \
+    --bea-dir data/bea60k --output reports/llm_judge_cpu/gemma-4-e2b-q4-sentence \
     --answer-mode sentence --skip-timed
 ```
 

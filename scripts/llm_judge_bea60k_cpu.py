@@ -493,6 +493,7 @@ def main() -> int:
                 server_binary=args.llama_server_binary,
                 port=args.llama_server_port,
                 n_threads=args.llama_threads,
+                log_path=args.output / "llama_server.log",
             )
         else:
             loaded = load_llm(args.model_id, dtype=args.dtype)

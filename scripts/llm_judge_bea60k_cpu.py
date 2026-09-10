@@ -55,12 +55,16 @@ from spelling_reranker.llm_judge_cpu import (
     build_generative_messages,
     build_messages,
     build_open_messages,
+    build_sentence_messages,
+    extract_corrected_word,
     generate_once,
     latency_stats,
     load_llm,
     parse_choice,
+    parse_corrected_sentence,
     parse_open_word,
     select_by_edit_distance_and_probability,
+    strip_outer_punctuation,
     write_latency_histogram,
 )
 
@@ -101,6 +105,8 @@ def run_phase(
     max_examples: int | None,
     beam_width: int = 3,
     edit_distance_weight: float = 1.0,
+    sentence_token_headroom: int = 32,
+    sentence_max_new_tokens_cap: int = 320,
 ) -> dict:
     predictions: list[dict] = []
     latencies: list[float] = []
@@ -134,21 +140,51 @@ def run_phase(
             choice = None
             chosen_word = chosen["word"] if chosen else None
             beam_info = ranked
+            sentence_info = None
         else:
-            if mode == "open":
-                messages = build_open_messages(
-                    err["context_before"], err["typo"], err["context_after"], err["candidates"]
-                )
-            else:
-                messages = build_messages(
-                    err["context_before"], err["typo"], err["context_after"], err["candidates"]
-                )
+            builder = {
+                "open": build_open_messages,
+                "sentence": build_sentence_messages,
+            }.get(mode, build_messages)
+            messages = builder(
+                err["context_before"], err["typo"], err["context_after"], err["candidates"]
+            )
+            # Sentence mode has to emit the whole sentence, not a number or a
+            # single word, so the 8-token budget the other modes use would
+            # truncate every answer. Size the budget per example from the
+            # sentence's own token count instead of picking one global number
+            # that is wasteful for short sentences and still too small for
+            # long ones.
+            budget = max_new_tokens
+            if mode == "sentence":
+                sentence = err["context_before"] + err["typo"] + err["context_after"]
+                n_sentence_tokens = len(loaded.tokenizer(sentence, add_special_tokens=False)["input_ids"])
+                budget = min(n_sentence_tokens + sentence_token_headroom, sentence_max_new_tokens_cap)
             try:
-                text, latency = generate_once(loaded, messages, max_new_tokens=max_new_tokens)
+                text, latency = generate_once(loaded, messages, max_new_tokens=budget)
             except Exception as exc:  # noqa: BLE001
                 predictions.append({**_slim(err), "error": str(exc)})
                 continue
-            if mode == "open":
+            sentence_info = None
+            if mode == "sentence":
+                choice = None
+                corrected_sentence = parse_corrected_sentence(text)
+                if corrected_sentence is None:
+                    chosen_word, span_tokens = None, 0
+                else:
+                    chosen_word, span_tokens = extract_corrected_word(
+                        corrected_sentence,
+                        err["context_before"],
+                        err["typo"],
+                        err["context_after"],
+                    )
+                sentence_info = {
+                    "corrected_sentence": corrected_sentence,
+                    "tag_parse_failed": corrected_sentence is None,
+                    "replacement_span_tokens": span_tokens,
+                    "max_new_tokens": budget,
+                }
+            elif mode == "open":
                 choice = None
                 chosen_word = parse_open_word(text)
             else:
@@ -157,6 +193,14 @@ def run_phase(
             beam_info = None
 
         correct = chosen_word is not None and nfc(chosen_word) == err["gold_n"]
+        # Sentence mode is the only mode whose answer can pick up sentence
+        # punctuation ("thirst." for gold "thirst"); tracked separately so a
+        # tokenisation artifact is visible instead of quietly inflating or
+        # deflating the headline number, which stays the strict one every
+        # other mode is scored by.
+        correct_depunctuated = chosen_word is not None and nfc(
+            strip_outer_punctuation(chosen_word)
+        ) == nfc(strip_outer_punctuation(err["gold"]))
         latencies.append(latency)
         predictions.append(
             {
@@ -167,7 +211,9 @@ def run_phase(
                 "chosen_word_in_pool": chosen_word is not None
                 and any(nfc(chosen_word) == nfc(c) for c in err["candidates"]),
                 "beam_candidates": beam_info,
+                "sentence": sentence_info,
                 "correct": correct,
+                "correct_depunctuated": correct_depunctuated,
                 "latency_s": latency,
             }
         )
@@ -187,6 +233,11 @@ def run_phase(
     outside_pool_correct = sum(1 for p in outside_pool if p.get("correct"))
     not_in_pool = [p for p in predictions if not p.get("gold_in_pool")]
     not_in_pool_correct = sum(1 for p in not_in_pool if p.get("correct"))
+    n_correct_depunct = sum(1 for p in predictions if p.get("correct_depunctuated"))
+    tag_failures = sum(1 for p in predictions if (p.get("sentence") or {}).get("tag_parse_failed"))
+    multiword_spans = sum(
+        1 for p in predictions if ((p.get("sentence") or {}).get("replacement_span_tokens") or 0) > 1
+    )
     return {
         "n_requested": n_scored,
         "n_ok": len(latencies),
@@ -195,6 +246,9 @@ def run_phase(
         "elapsed_seconds": elapsed,
         "throughput_qps": (len(latencies) / elapsed) if elapsed > 0 else None,
         "overall_accuracy": (n_correct / n_scored) if n_scored else None,
+        "overall_accuracy_depunctuated": (n_correct_depunct / n_scored) if n_scored else None,
+        "n_sentence_tag_parse_failures": tag_failures,
+        "n_sentence_multiword_replacements": multiword_spans,
         "conditional_accuracy": (cond_correct / len(cond_pool)) if cond_pool else None,
         "n_gold_in_pool": len(cond_pool),
         "hunspell_top1_accuracy_on_sample": (hunspell_top1_on_sample / n_scored) if n_scored else None,
@@ -237,13 +291,17 @@ def main() -> int:
     parser.add_argument("--dtype", default="auto", help="'auto' -> bfloat16 (memory-safe on CPU too)")
     parser.add_argument(
         "--answer-mode",
-        choices=("index", "open", "beam"),
+        choices=("index", "open", "beam", "sentence"),
         default="index",
         help="'index': pick a candidate number (default). 'open': same prompt/candidates "
         "shown as a hint, but the model may write any word, not just one of them. "
         "'beam': no Hunspell candidates shown -- the model's own beam search "
         "(--beam-width) generates candidate words, reranked by edit distance to "
-        "the typo and log-probability (--edit-distance-weight).",
+        "the typo and log-probability (--edit-distance-weight). "
+        "'sentence': same candidate list as 'index', but the model rewrites the "
+        "whole sentence with the typo replaced by the corrected word, wrapped in "
+        "<corrected_sentence></corrected_sentence>; the correction is recovered by "
+        "aligning that rewrite against the original sentence.",
     )
     parser.add_argument("--beam-width", type=int, default=3, help="only used by --answer-mode beam")
     parser.add_argument(
@@ -332,11 +390,20 @@ def main() -> int:
             loaded, warm_messages, beam_width=args.beam_width, max_new_tokens=args.max_new_tokens
         )
     else:
-        warm_builder = build_open_messages if args.answer_mode == "open" else build_messages
+        warm_builder = {
+            "open": build_open_messages,
+            "sentence": build_sentence_messages,
+        }.get(args.answer_mode, build_messages)
         warm_messages = warm_builder(
             warm_err["context_before"], warm_err["typo"], warm_err["context_after"], warm_err["candidates"]
         )
-        _, warmup_latency = generate_once(loaded, warm_messages, max_new_tokens=args.max_new_tokens)
+        warm_budget = args.max_new_tokens
+        if args.answer_mode == "sentence":
+            warm_sentence = warm_err["context_before"] + warm_err["typo"] + warm_err["context_after"]
+            warm_budget = min(
+                len(loaded.tokenizer(warm_sentence, add_special_tokens=False)["input_ids"]) + 32, 320
+            )
+        _, warmup_latency = generate_once(loaded, warm_messages, max_new_tokens=warm_budget)
     meta["warmup_latency_s"] = warmup_latency
     print(f"loaded in {load_seconds:.1f}s (warmup call {warmup_latency * 1000:.0f}ms)", flush=True)
 

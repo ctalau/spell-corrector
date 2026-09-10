@@ -44,6 +44,8 @@ from spelling_reranker.byte_encoding import nfc
 from spelling_reranker.candidates import build_pool
 from spelling_reranker.hunspell import default_engine
 from spelling_reranker.llm_judge import (
+    beam_word_candidates,
+    build_generative_messages,
     build_messages,
     build_open_messages,
     generate_once,
@@ -51,6 +53,7 @@ from spelling_reranker.llm_judge import (
     load_llm,
     parse_choice,
     parse_open_word,
+    select_by_edit_distance_and_probability,
     write_latency_histogram,
 )
 
@@ -89,6 +92,8 @@ def run_phase(
     max_new_tokens: int,
     time_budget_seconds: float | None,
     max_examples: int | None,
+    beam_width: int = 3,
+    edit_distance_weight: float = 1.0,
 ) -> dict:
     predictions: list[dict] = []
     latencies: list[float] = []
@@ -104,23 +109,46 @@ def run_phase(
             break
         err = errors[indices[i % n]]
         i += 1
-        if mode == "open":
-            messages = build_open_messages(
-                err["context_before"], err["typo"], err["context_after"], err["candidates"]
+
+        if mode == "beam":
+            messages = build_generative_messages(err["context_before"], err["typo"], err["context_after"])
+            try:
+                beam_candidates, latency = beam_word_candidates(
+                    loaded, messages, beam_width=beam_width, max_new_tokens=max_new_tokens
+                )
+            except Exception as exc:  # noqa: BLE001
+                predictions.append({**_slim(err), "error": str(exc)})
+                continue
+            ranked = select_by_edit_distance_and_probability(
+                beam_candidates, err["typo"], edit_distance_weight=edit_distance_weight
             )
-        else:
-            messages = build_messages(err["context_before"], err["typo"], err["context_after"], err["candidates"])
-        try:
-            text, latency = generate_once(loaded, messages, max_new_tokens=max_new_tokens)
-        except Exception as exc:  # noqa: BLE001
-            predictions.append({**_slim(err), "error": str(exc)})
-            continue
-        if mode == "open":
+            chosen = ranked[0] if ranked else None
+            text = None
             choice = None
-            chosen_word = parse_open_word(text)
+            chosen_word = chosen["word"] if chosen else None
+            beam_info = ranked
         else:
-            choice = parse_choice(text, len(err["candidates"]))
-            chosen_word = err["candidates"][choice - 1] if choice is not None else None
+            if mode == "open":
+                messages = build_open_messages(
+                    err["context_before"], err["typo"], err["context_after"], err["candidates"]
+                )
+            else:
+                messages = build_messages(
+                    err["context_before"], err["typo"], err["context_after"], err["candidates"]
+                )
+            try:
+                text, latency = generate_once(loaded, messages, max_new_tokens=max_new_tokens)
+            except Exception as exc:  # noqa: BLE001
+                predictions.append({**_slim(err), "error": str(exc)})
+                continue
+            if mode == "open":
+                choice = None
+                chosen_word = parse_open_word(text)
+            else:
+                choice = parse_choice(text, len(err["candidates"]))
+                chosen_word = err["candidates"][choice - 1] if choice is not None else None
+            beam_info = None
+
         correct = chosen_word is not None and nfc(chosen_word) == err["gold_n"]
         latencies.append(latency)
         predictions.append(
@@ -131,6 +159,7 @@ def run_phase(
                 "chosen_word": chosen_word,
                 "chosen_word_in_pool": chosen_word is not None
                 and any(nfc(chosen_word) == nfc(c) for c in err["candidates"]),
+                "beam_candidates": beam_info,
                 "correct": correct,
                 "latency_s": latency,
             }
@@ -201,10 +230,20 @@ def main() -> int:
     parser.add_argument("--dtype", default="auto", help="'auto' -> bfloat16 (memory-safe on CPU too)")
     parser.add_argument(
         "--answer-mode",
-        choices=("index", "open"),
+        choices=("index", "open", "beam"),
         default="index",
         help="'index': pick a candidate number (default). 'open': same prompt/candidates "
-        "shown as a hint, but the model may write any word, not just one of them.",
+        "shown as a hint, but the model may write any word, not just one of them. "
+        "'beam': no Hunspell candidates shown -- the model's own beam search "
+        "(--beam-width) generates candidate words, reranked by edit distance to "
+        "the typo and log-probability (--edit-distance-weight).",
+    )
+    parser.add_argument("--beam-width", type=int, default=3, help="only used by --answer-mode beam")
+    parser.add_argument(
+        "--edit-distance-weight",
+        type=float,
+        default=1.0,
+        help="only used by --answer-mode beam: score = logprob - weight * edit_distance(word, typo)",
     )
     parser.add_argument("--skip-timed", action="store_true", help="only run the fixed n-samples phase")
     args = parser.parse_args()
@@ -240,6 +279,8 @@ def main() -> int:
         "max_new_tokens": args.max_new_tokens,
         "dtype": args.dtype,
         "answer_mode": args.answer_mode,
+        "beam_width": args.beam_width if args.answer_mode == "beam" else None,
+        "edit_distance_weight": args.edit_distance_weight if args.answer_mode == "beam" else None,
         "bea_n_word_errors": hunspell_meta["n_word_errors"],
         "bea_n_hunspell_flagged": hunspell_meta["n_hunspell_flagged"],
         "bea_n_eligible": len(eligible),
@@ -276,11 +317,19 @@ def main() -> int:
     # Warm up: first call pays for CUDA kernel compilation / cache warming and
     # is excluded from every latency stat below.
     warm_err = errors[sample_100[0]]
-    warm_builder = build_open_messages if args.answer_mode == "open" else build_messages
-    warm_messages = warm_builder(
-        warm_err["context_before"], warm_err["typo"], warm_err["context_after"], warm_err["candidates"]
-    )
-    _, warmup_latency = generate_once(loaded, warm_messages, max_new_tokens=args.max_new_tokens)
+    if args.answer_mode == "beam":
+        warm_messages = build_generative_messages(
+            warm_err["context_before"], warm_err["typo"], warm_err["context_after"]
+        )
+        _, warmup_latency = beam_word_candidates(
+            loaded, warm_messages, beam_width=args.beam_width, max_new_tokens=args.max_new_tokens
+        )
+    else:
+        warm_builder = build_open_messages if args.answer_mode == "open" else build_messages
+        warm_messages = warm_builder(
+            warm_err["context_before"], warm_err["typo"], warm_err["context_after"], warm_err["candidates"]
+        )
+        _, warmup_latency = generate_once(loaded, warm_messages, max_new_tokens=args.max_new_tokens)
     meta["warmup_latency_s"] = warmup_latency
     print(f"loaded in {load_seconds:.1f}s (warmup call {warmup_latency * 1000:.0f}ms)", flush=True)
 
@@ -293,6 +342,8 @@ def main() -> int:
         max_new_tokens=args.max_new_tokens,
         time_budget_seconds=None,
         max_examples=len(sample_100),
+        beam_width=args.beam_width,
+        edit_distance_weight=args.edit_distance_weight,
     )
     write_latency_histogram(phase1["_latencies"], args.output, "sample100")
     (args.output / "predictions_sample100.jsonl").write_text(
@@ -315,6 +366,8 @@ def main() -> int:
             max_new_tokens=args.max_new_tokens,
             time_budget_seconds=args.time_budget_seconds,
             max_examples=None,
+            beam_width=args.beam_width,
+            edit_distance_weight=args.edit_distance_weight,
         )
         write_latency_histogram(phase2["_latencies"], args.output, "timed")
         (args.output / "predictions_timed.jsonl").write_text(

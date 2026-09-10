@@ -180,10 +180,9 @@ def load_llm(model_id: str, *, dtype: str = "auto", trust_remote_code: bool = Tr
     )
 
 
-def generate_once(loaded: LoadedModel, messages: list[dict], *, max_new_tokens: int = 8) -> tuple[str, float]:
-    """Greedy-decode a short completion; returns (text, wall-clock seconds)."""
-    import torch
-
+def _prepare_inputs(loaded: LoadedModel, messages: list[dict]):
+    """Fold system role / thinking-mode handling and tokenize the prompt.
+    Shared by every generation entry point below."""
     tok = loaded.tokenizer
     msgs = messages
     if not loaded.supports_system_role:
@@ -197,7 +196,15 @@ def generate_once(loaded: LoadedModel, messages: list[dict], *, max_new_tokens: 
     if loaded.supports_enable_thinking:
         template_kwargs["enable_thinking"] = False
     prompt = tok.apply_chat_template(msgs, **template_kwargs)
-    inputs = tok(prompt, return_tensors="pt", add_special_tokens=False).to(loaded.device)
+    return tok(prompt, return_tensors="pt", add_special_tokens=False).to(loaded.device)
+
+
+def generate_once(loaded: LoadedModel, messages: list[dict], *, max_new_tokens: int = 8) -> tuple[str, float]:
+    """Greedy-decode a short completion; returns (text, wall-clock seconds)."""
+    import torch
+
+    tok = loaded.tokenizer
+    inputs = _prepare_inputs(loaded, messages)
 
     if loaded.device.type == "cuda":
         torch.cuda.synchronize()
@@ -216,6 +223,134 @@ def generate_once(loaded: LoadedModel, messages: list[dict], *, max_new_tokens: 
     new_tokens = out[0][inputs["input_ids"].shape[1] :]
     text = tok.decode(new_tokens, skip_special_tokens=True)
     return text, latency
+
+
+#: Generative mode: the model corrects the typo from its own knowledge, with
+#: no Hunspell candidate list at all -- beam search below supplies multiple
+#: candidate words instead, reranked by edit distance to the typo.
+SYSTEM_PROMPT_GENERATIVE = (
+    "You are an expert English spelling-correction assistant. You will be "
+    "shown a sentence with one misspelled word marked <TYPO>...</TYPO>. "
+    "Give the single best corrected spelling for the marked word given the "
+    "sentence context. "
+    "Reply with ONLY the corrected word and nothing else."
+)
+
+
+def build_generative_messages(context_before: str, typo: str, context_after: str) -> list[dict]:
+    content = (
+        f"Sentence: {context_before}<TYPO>{typo}</TYPO>{context_after}\n"
+        "Answer with only the corrected word."
+    )
+    return [
+        {"role": "system", "content": SYSTEM_PROMPT_GENERATIVE},
+        {"role": "user", "content": content},
+    ]
+
+
+def edit_distance(a: str, b: str) -> int:
+    """Levenshtein distance (insert/delete/substitute, cost 1 each)."""
+    a, b = a.lower(), b.lower()
+    if a == b:
+        return 0
+    prev = list(range(len(b) + 1))
+    for i, ca in enumerate(a, 1):
+        cur = [i]
+        for j, cb in enumerate(b, 1):
+            cur.append(min(prev[j] + 1, cur[j - 1] + 1, prev[j - 1] + (ca != cb)))
+        prev = cur
+    return prev[-1]
+
+
+def beam_word_candidates(
+    loaded: LoadedModel, messages: list[dict], *, beam_width: int = 3, max_new_tokens: int = 6
+) -> tuple[list[dict], float]:
+    """Beam search (width `beam_width`) for a short completion, truncated at
+    each beam's own first word boundary.
+
+    Uses transformers' own beam search (`num_beams=num_return_sequences=
+    beam_width`), which keeps only the `beam_width` highest cumulative-
+    log-probability sequences at every generation step -- the standard
+    reading of "branch by the top-k tokens at every step". Each of the
+    `beam_width` returned sequences is then cut at its first word boundary
+    (whitespace/punctuation/EOS) via `parse_open_word`, and its
+    log-probability is re-summed over only the tokens up to that cut using
+    `compute_transition_scores`, so a beam that kept generating past the word
+    is not penalized for tokens beyond it.
+
+    Returns (candidates, wall-clock seconds), where each candidate is
+    {"word": str | None, "logprob": float, "n_tokens": int}.
+    """
+    import torch
+
+    tok = loaded.tokenizer
+    inputs = _prepare_inputs(loaded, messages)
+    prompt_len = inputs["input_ids"].shape[1]
+
+    if loaded.device.type == "cuda":
+        torch.cuda.synchronize()
+    t0 = time.perf_counter()
+    with torch.no_grad():
+        out = loaded.model.generate(
+            **inputs,
+            max_new_tokens=max_new_tokens,
+            num_beams=beam_width,
+            num_return_sequences=beam_width,
+            do_sample=False,
+            output_scores=True,
+            return_dict_in_generate=True,
+            pad_token_id=tok.pad_token_id if tok.pad_token_id is not None else tok.eos_token_id,
+        )
+    if loaded.device.type == "cuda":
+        torch.cuda.synchronize()
+    latency = time.perf_counter() - t0
+
+    gen_ids_batch = out.sequences[:, prompt_len:]
+    transition_scores = loaded.model.compute_transition_scores(
+        out.sequences, out.scores, getattr(out, "beam_indices", None), normalize_logits=True
+    )
+
+    candidates: list[dict] = []
+    for row_ids, row_scores in zip(gen_ids_batch.tolist(), transition_scores.tolist()):
+        cum_logprob = 0.0
+        used_tokens = 0
+        word: str | None = None
+        for tid, score in zip(row_ids, row_scores):
+            is_pad = tid == tok.pad_token_id
+            is_eos = tok.eos_token_id is not None and (
+                tid == tok.eos_token_id if isinstance(tok.eos_token_id, int) else tid in tok.eos_token_id
+            )
+            if is_pad or is_eos or score == float("-inf"):
+                break
+            cum_logprob += score
+            used_tokens += 1
+            text_so_far = tok.decode(row_ids[:used_tokens], skip_special_tokens=True)
+            candidate_word = parse_open_word(text_so_far)
+            if candidate_word is not None and len(text_so_far.strip()) > len(candidate_word):
+                word = candidate_word
+                break
+        if word is None and used_tokens:
+            word = parse_open_word(tok.decode(row_ids[:used_tokens], skip_special_tokens=True))
+        candidates.append({"word": word, "logprob": cum_logprob, "n_tokens": used_tokens})
+    return candidates, latency
+
+
+def select_by_edit_distance_and_probability(
+    candidates: list[dict], typo: str, *, edit_distance_weight: float = 1.0
+) -> list[dict]:
+    """Score each beam candidate as `logprob - weight * edit_distance(word,
+    typo)` and return the candidates sorted best-first (best = argmax). Edit
+    distance is to the *typo*, not the gold correction (unknown at inference
+    time) -- a cheap noisy-channel-style prior that a genuine correction is
+    usually a small number of edits from the misspelling."""
+    scored = []
+    for cand in candidates:
+        word = cand.get("word")
+        dist = edit_distance(word, typo) if word is not None else None
+        score = (cand["logprob"] - edit_distance_weight * dist) if dist is not None else float("-inf")
+        scored.append({**cand, "edit_distance": dist, "combined_score": score})
+    scored.sort(key=lambda c: c["combined_score"], reverse=True)
+    return scored
 
 
 #: Fixed latency-histogram bin edges in milliseconds. Deliberately fine near

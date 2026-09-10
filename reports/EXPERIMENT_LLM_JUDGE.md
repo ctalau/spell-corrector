@@ -121,6 +121,45 @@ charts (fixed-sample and timed-run separately).
   percentages as precise; a 95% CI on a 100-sample binomial proportion near 40-80%
   is roughly ±8-10pp.
 
+## Follow-up: how much does the forced-choice format itself cost?
+
+gemma-4-E2B-it's index-mode result above (83.0% overall / 100% conditional) is
+capped by construction: 17 of the 100 sampled errors never had the gold correction
+anywhere in Hunspell's candidate list, so no forced choice among those candidates
+could ever get them right. `--answer-mode open` (`spelling_reranker/llm_judge.py`,
+`build_open_messages`/`parse_open_word`) tests the same fixed 100-sample subset,
+shows the same Hunspell candidates as a hint, but lets the model write any word
+instead of restricting it to picking one.
+
+| | gemma-4-E2B-it, index mode | gemma-4-E2B-it, open mode |
+|---|---|---|
+| Overall accuracy | 83.0% | **90.0%** |
+| Conditional accuracy (gold was offered, 83/100) | 100% | 96.4% (80/83) |
+| Accuracy when gold was *not* offered (17/100) | 0% (impossible by construction) | **58.8% (10/17)** |
+
+Removing the constraint is a net +7pp: it recovers just over half of the
+previously-unreachable cases (10/17), at a small cost on the subset where the
+listed candidates already contained the answer (100% -> 96.4%, i.e. 3/83 cases
+where the model wrote something else despite a correct option being right there).
+A characteristic recovered example: typo "thursty" in "I had the worst thursty I
+have ever had" -- Hunspell's only candidates were "thirsty" and "hurst" (both
+wrong; the context calls for the noun "thirst", not the adjective "thirsty"), and
+gemma-4-E2B-it produced "thirst" directly from context despite it never appearing
+in the candidate list. Full predictions:
+`reports/llm_judge/gemma-4-e2b-open/predictions_sample100.jsonl`.
+
+**Latency from this run is not comparable and is excluded from the table above on
+purpose.** It happened to run during a period of unusually slow disk I/O on this
+box: `low_cpu_mem_usage=True` loads the (already-bf16) checkpoint via mmap rather
+than copying it into RAM, so the *first* touch of each weight page during a
+forward pass faults it in from disk rather than RAM. Confirmed live via
+`/proc/<pid>/io` during the run: sustained reads of only ~5-6MB/s (this box's disk
+is otherwise capable of far more), driving the warmup call alone to 258s and
+per-example latency to a 10.2s median -- roughly 16x the 632ms median from the
+index-mode run of the same model on the same box. That gap is a disk-I/O artifact
+of this specific run, not a property of open- vs index-mode generation; a rerun
+under normal I/O should land close to the index-mode latency.
+
 ## Reproducing
 
 ```bash
@@ -134,6 +173,12 @@ python scripts/llm_judge_bea60k.py \
 python scripts/llm_judge_bea60k.py \
     --model-id openbmb/MiniCPM5-1B --model-name minicpm5-1b \
     --bea-dir data/bea60k --output reports/llm_judge/minicpm5-1b
+
+# Open-answer ablation (same 100-sample subset, candidates shown only as a hint):
+python scripts/llm_judge_bea60k.py \
+    --model-id google/gemma-4-E2B-it --model-name gemma-4-e2b-open \
+    --bea-dir data/bea60k --output reports/llm_judge/gemma-4-e2b-open \
+    --answer-mode open --skip-timed
 ```
 
 On a GPU pod, `scripts/runpod/bootstrap_llm_judge.sh` runs both automatically (see

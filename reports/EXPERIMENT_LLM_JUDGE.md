@@ -136,20 +136,23 @@ subset with that constraint loosened or removed entirely:
   `select_by_edit_distance_and_probability`): no Hunspell candidates shown at all.
   The model's own beam search (width 3) generates up to 3 candidate words; each is
   cut at its first word boundary and scored `logprob - weight * edit_distance(word,
-  typo)` (weight 1.0), and the top-scoring one is the answer. This replaces Hunspell
-  as the candidate generator entirely, using only the LLM plus a classic
-  noisy-channel-style edit-distance prior.
+  typo)` (weight 1.0, so edit distance is a prior *weighted against* the model's own
+  probability, never an absolute decider on its own), and the top-scoring survivor
+  is the answer. A candidate identical to the typo itself is dropped before scoring
+  -- see the flaw-and-fix note below for why. This replaces Hunspell as the
+  candidate generator entirely, using only the LLM plus a classic noisy-channel-style
+  edit-distance prior.
 
 | | Index (pick from list) | Open (list as hint, free answer) | Beam (no list, self-generated + edit-distance rerank) |
 |---|---|---|---|
-| Overall accuracy | 83.0% | **90.0%** | 87.0% |
-| Conditional accuracy (gold was offered, 83/100) | 100% | 96.4% (80/83) | 91.6% (76/83) |
+| Overall accuracy | 83.0% | **90.0%** | 88.0% |
+| Conditional accuracy (gold was offered, 83/100) | 100% | 96.4% (80/83) | 92.8% (77/83) |
 | Accuracy when gold was *not* offered (17/100) | 0% (impossible by construction) | 58.8% (10/17) | **64.7% (11/17)** |
 
 Both follow-ups beat index mode overall by removing its hard ceiling. Open mode
 wins on total accuracy (90.0%), but beam mode -- despite getting *no* Hunspell hint
 at all -- recovers the most of the previously-unreachable cases (64.7% vs 58.8%),
-at the cost of being weaker on the "easy" gold-in-pool subset (91.6% vs 96.4%,
+at the cost of being weaker on the "easy" gold-in-pool subset (92.8% vs 96.4%,
 unsurprising since it never sees Hunspell's list to fall back on). A characteristic
 open-mode recovery: typo "thursty" in "I had the worst thursty I have ever had" --
 Hunspell's only candidates were "thirsty" and "hurst" (both wrong; the context
@@ -157,18 +160,25 @@ calls for the noun "thirst", not the adjective "thirsty"), and gemma-4-E2B-it
 produced "thirst" directly from context despite it never appearing in the
 candidate list.
 
-**A genuine flaw, not glossed over:** 2 of beam mode's 13 wrong answers are the
-model echoing the typo completely unchanged ("ugry" -> "ugry" instead of "ugly";
-"Miken" -> "Miken" instead of "McCain"). The scoring formula is structurally
-responsible: `edit_distance(word, typo)` is 0 when a beam candidate equals the
-typo itself, so the formula rewards *not correcting at all* whenever the
-logprob gap to a real correction is small (for "ugry": logprob -0.73 for the
-echoed typo vs -0.70 for "ugly" -- nearly tied on probability, but the +1 edit
-distance was enough to flip it). A straightforward fix is to exclude or heavily
-penalize candidates equal to the typo before reranking; not applied here so the
-result reported is the honest, unpatched one. Full predictions with all 3 beam
-candidates and their scores per example: `reports/llm_judge/{gemma-4-e2b-open,
-gemma-4-e2b-beam}/predictions_sample100.jsonl`.
+**A genuine flaw, found and fixed, not glossed over.** The first beam-mode run
+(87.0% overall, 91.6% conditional) had 2 of its 13 wrong answers echoing the typo
+completely unchanged ("ugry" -> "ugry" instead of "ugly"; "Miken" -> "Miken"
+instead of "McCain"). The scoring formula was structurally responsible:
+`edit_distance(word, typo)` is 0 when a beam candidate equals the typo itself, so
+the formula rewarded *not correcting at all* whenever the logprob gap to a real
+correction was small (for "ugry": logprob -0.73 for the echoed typo vs -0.70 for
+"ugly" -- nearly tied on probability, but the +1 edit distance was enough to flip
+it). Fixed in `select_by_edit_distance_and_probability` by dropping any candidate
+identical to the typo (case-insensitive) before scoring, rather than just leaving
+it to compete on edit distance -- echoing the typo is not a correction, so it
+should never be a candidate, not merely a disadvantaged one. Rerunning with the
+fix: overall accuracy 87.0% -> **88.0%**, conditional 91.6% -> **92.8%**. "ugry" now
+resolves to "ugly" cleanly (0 wrong answers echo the typo, down from 2). "Miken"
+still resolves incorrectly (now to "Mike" rather than the typo itself) -- correctly
+so, since "McCain" is too many edits away from "Miken" to recover with this
+method; that one was never the scoring bug's fault. Full predictions with all
+surviving beam candidates and their scores per example:
+`reports/llm_judge/{gemma-4-e2b-open,gemma-4-e2b-beam}/predictions_sample100.jsonl`.
 
 **Latency is not comparable across these three rows and is deliberately left out
 of the table.** The open-mode run happened to hit a period of unusually slow disk

@@ -54,9 +54,10 @@ DEFAULT_IMAGE = "runpod/pytorch:1.0.2-cu1281-torch280-ubuntu2404"
 #: Do not use the cu128 / py3.12 / torch 2.8 image until hunspell works on 3.12.
 FROZEN_IMAGE = "runpod/pytorch:2.4.0-py3.11-cuda12.4.1-devel-ubuntu22.04"
 #: LLM-judge / Gemma-4: same py3.11 + CUDA 12.4 host image (hunspell). Image
-#: torch is 2.4.1; setup_llm_judge.sh upgrades the venv to torch>=2.5.1+cu124
-#: so `torch.distributed.tensor.DTensor` exists. Never the cu128 / py3.12
-#: image -- those wheels fall back to CPU on Community CUDA 12.4 hosts.
+#: torch is 2.4.1; setup_llm_judge.sh upgrades the venv to torch==2.5.1+cu124
+#: (DTensor) and force-installs nvidia-cudnn-cu12 so libcudnn.so.9 resolves.
+#: Never the cu128 / py3.12 image -- those wheels fall back to CPU on
+#: Community CUDA 12.4 hosts.
 LLM_JUDGE_IMAGE = "runpod/pytorch:2.4.0-py3.11-cuda12.4.1-devel-ubuntu22.04"
 
 
@@ -84,9 +85,9 @@ def main() -> int:
         default=None,
         help=(
             "Pod image. Frozen and LLM-judge default is the cu124/py3.11 "
-            "image (hunspell). LLM-judge then pip-installs torch>=2.5.1+cu124 "
-            "for Gemma-4 / DTensor. Do not pass the cu128/py3.12 torch 2.8 "
-            "image for frozen or LLM-judge."
+            "image (hunspell). LLM-judge then pip-installs torch==2.5.1+cu124 "
+            "plus nvidia-cudnn-cu12 for Gemma-4 / DTensor. Do not pass the "
+            "cu128/py3.12 torch 2.8 image for frozen or LLM-judge."
         ),
     )
     parser.add_argument("--disk-gb", type=int, default=None)

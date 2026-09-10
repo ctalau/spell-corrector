@@ -5,8 +5,10 @@
 #
 # Gemma-4 (`google/gemma-4-E2B-it`) needs torch>=2.5 so
 # `from torch.distributed.tensor import DTensor` succeeds, built for CUDA
-# 12.4 (cu124). setup_llm_judge.sh installs torch>=2.5.1+cu124 into the
-# venv on the documented py3.11 / CUDA 12.4 image. Do not launch with a
+# 12.4 (cu124). setup_llm_judge.sh installs torch==2.5.1+cu124 into the
+# venv on the documented py3.11 / CUDA 12.4 image, force-installs
+# nvidia-cudnn-cu12 (libcudnn.so.9) into the venv, and writes
+# /workspace/llm-judge-env.sh with LD_LIBRARY_PATH. Do not launch with a
 # cu128 image or cu128 wheels -- Community hosts with a CUDA 12.4 driver
 # then silently fall back to CPU.
 #
@@ -88,6 +90,14 @@ if [ -x /workspace/venv/bin/python ]; then
     PYTHON=/workspace/venv/bin/python
     export PYTHON
     export PATH="/workspace/venv/bin:$PATH"
+fi
+# setup is a subprocess; re-apply nvidia lib dirs so `import torch` finds
+# libcudnn.so.9 (venv nvidia-cudnn-cu12 is not on the default linker path).
+if [ -f /workspace/llm-judge-env.sh ]; then
+    # shellcheck disable=SC1091
+    . /workspace/llm-judge-env.sh
+    echo "sourced /workspace/llm-judge-env.sh"
+    echo "LD_LIBRARY_PATH=${LD_LIBRARY_PATH:-unset}"
 fi
 echo "python now $PYTHON ($($PYTHON -V 2>&1))"
 

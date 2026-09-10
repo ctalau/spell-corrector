@@ -102,7 +102,12 @@ status "experiment"
 TARGET_TRAIN="${TARGET_TRAIN:-3000000}" \
 TARGET_VALID="${TARGET_VALID:-60000}" \
 CONFIG="${CONFIG:-configs/train_full.yaml}" \
+EXPERIMENT="${EXPERIMENT:-byte}"
+if [ "$EXPERIMENT" = "frozen" ] || [[ "$CONFIG" == *frozen* ]]; then
+  bash scripts/runpod/run_frozen_experiment.sh
+else
   bash scripts/runpod/run_experiment.sh
+fi
 RC=$?
 
 status "collecting artifacts"

@@ -21,12 +21,14 @@ dependencies = [
     "matplotlib>=3.8",
     "requests>=2.31",
     "hunspell>=0.5.5",
+    "transformers>=4.48,<5",
+    "tokenizers",
+    "huggingface_hub",
+    "accelerate",
 ]
 
 [project.optional-dependencies]
-dev = ["pytest>=8.0"]
-# scripts/llm_judge_bea60k.py only -- not needed for the trained reranker.
-llm-judge = ["transformers>=4.57", "accelerate>=0.34"]
+dev = ["pytest>=8.0", "pytest-timeout>=2.3"]
 
 [tool.setuptools.packages.find]
 include = ["spelling_reranker*"]
@@ -34,3 +36,6 @@ include = ["spelling_reranker*"]
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 addopts = "-q"
+markers = [
+    "slow: HF ModernBERT download, CUDA extract, or long training — excluded on the frozen Runpod gate",
+]

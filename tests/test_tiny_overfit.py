@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import pytest
 import torch
 from torch.utils.data import DataLoader
 
@@ -44,6 +45,7 @@ def _tiny_set(n: int = 128):
     return examples
 
 
+@pytest.mark.slow
 def test_tiny_overfit_loss_drops() -> None:
     seed_everything(1337)
     examples = _tiny_set(128)

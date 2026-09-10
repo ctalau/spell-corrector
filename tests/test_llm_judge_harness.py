@@ -130,3 +130,19 @@ def test_sample_uses_all_eligible_when_n_samples_exceeds_pool():
     phases = lj.plan_phases(args, [0, 2])
     assert phases[0].indices == (0, 2)
     assert phases[0].max_examples == 2
+
+
+def test_llm_judge_setup_pins_transformers_for_torch24_and_gemma4():
+    """Regression: unbounded transformers>=4.57 pulled 5.17, which disables torch 2.4."""
+    pin = "transformers>=5.5,<5.15"
+    root = Path(__file__).resolve().parents[1]
+    setup = (root / "scripts/runpod/setup_llm_judge.sh").read_text()
+    assert f'"{pin}"' in setup
+    assert "transformers>=4.57" not in setup
+    assert "cannot import torch/AutoModel" in setup
+    assert "is_torch_available" in setup
+    assert "AutoModelForMultimodalLM" in setup
+    assert "runpod/pytorch:2.4.0-py3.11-cuda12.4.1-devel-ubuntu22.04" in setup
+    report = (root / "reports/EXPERIMENT_LLM_JUDGE.md").read_text()
+    assert "runpod/pytorch:2.4.0-py3.11-cuda12.4.1-devel-ubuntu22.04" in report
+    assert pin in report

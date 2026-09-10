@@ -150,6 +150,8 @@ checkpointed every 2000.
 
 ### Full Gemma on Runpod (1 hour, Gemma-only)
 
+GPU pods use `runpod/pytorch:2.4.0-py3.11-cuda12.4.1-devel-ubuntu22.04` with `transformers>=5.5,<5.15` (Gemma-4 needs 5.5; 5.15+ disables this image's torch 2.4.1).
+
 Cheapest planned GPU: Community RTX A4000 (~$0.17/hr). Bootstrap skips the
 100-sample + 5-min combo when `TIME_BUDGET_SECONDS` is not `300`, and skips
 model B when `MODEL_B_ID` is `none` / empty. Single timed phase at 3600s:

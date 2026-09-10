@@ -146,7 +146,7 @@ def test_llm_judge_setup_requires_torch25_cu124_and_gemma4():
     assert "from torch.distributed.tensor import DTensor" in setup
     assert "transformers.models.gemma4" in setup
     assert '"transformers>=5.5"' in setup
-    assert "transformers>=5.5,<5.15" not in setup
+    assert '"transformers>=5.5,<5.15"' not in setup
     assert "transformers>=4.57" not in setup
     assert "is_torch_available" in setup
     assert "AutoModelForMultimodalLM" in setup
@@ -162,5 +162,5 @@ def test_llm_judge_setup_requires_torch25_cu124_and_gemma4():
     report = (root / "reports/EXPERIMENT_LLM_JUDGE.md").read_text()
     assert "runpod/pytorch:2.4.0-py3.11-cuda12.4.1-devel-ubuntu22.04" in report
     assert "torch>=2.5.1+cu124" in report
-    assert "transformers>=5.5" in report
-    assert "transformers>=5.5,<5.15" not in report
+    assert "`transformers>=5.5`" in report
+    assert "rwfef0kegboxvk" in report

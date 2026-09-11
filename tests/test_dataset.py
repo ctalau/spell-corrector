@@ -15,6 +15,11 @@ TRAIN_CODE_FILES = [
     "spelling_reranker/dataset.py",
     "spelling_reranker/typo_gen.py",
     "spelling_reranker/candidates.py",
+    # Prompt optimization is training too: DSPy scores candidate prompts and
+    # selects demonstrations against these files' output, so neither the dev-set
+    # builder nor the programs it feeds may know the benchmark exists.
+    "spelling_reranker/dev_set.py",
+    "spelling_reranker/dspy_program.py",
     "scripts/build_training_data.py",
     "scripts/download_sources.py",
 ]

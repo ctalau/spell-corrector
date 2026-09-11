@@ -27,6 +27,9 @@ htmlcov/
 data/raw/
 data/bea60k/
 data/cache/
+# Prompt-optimization dev set: regenerated deterministically by
+# spelling_reranker/dev_set.py (seeded), and it caches a corpus slice.
+data/dev_set/
 *.zip
 
 # Frozen-encoder feature caches (multi-GB). Manifests/hashes live in artifacts/frozen.

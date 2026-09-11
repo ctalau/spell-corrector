@@ -35,6 +35,11 @@ dev = ["pytest>=8.0", "pytest-timeout>=2.3"]
 # scripts/llm_judge_bea60k.py's GPU track, validated on transformers 4.x/early
 # 5.x with a pinned torch/cudnn combination this CPU track does not share).
 llm-judge-cpu = ["transformers>=4.57", "accelerate>=0.34"]
+# scripts/dspy_prompt_search.py only. `dspy` is the current distribution name;
+# the older `dspy-ai` name is a legacy alias and must not be installed instead.
+# DSPy talks to llama-server over its OpenAI-compatible endpoint through
+# LiteLLM, so no torch/transformers is needed on top of the core deps.
+dspy = ["dspy>=3.0"]
 
 [tool.setuptools.packages.find]
 include = ["spelling_reranker*"]

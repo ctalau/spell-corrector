@@ -333,6 +333,17 @@ class EvalResult:
     def lenient_accuracy(self) -> float:
         return self.lenient / self.n if self.n else 0.0
 
+    @property
+    def p50_latency_s(self) -> float:
+        """Median per-call latency. DSPy's field markup costs decoded tokens on
+        top of the answer itself, so this is how that shows up against the
+        hand-written prompt's one-word answer."""
+        values = sorted(r["latency_s"] for r in self.records if "latency_s" in r)
+        if not values:
+            return 0.0
+        mid = len(values) // 2
+        return values[mid] if len(values) % 2 else (values[mid - 1] + values[mid]) / 2
+
     def to_dict(self, *, include_records: bool = False) -> dict:
         out = {
             "n": self.n,
@@ -343,6 +354,7 @@ class EvalResult:
             "prediction_errors": self.errors,
             "empty_answers": self.empty,
             "wall_clock_s": self.wall_clock_s,
+            "p50_latency_s": self.p50_latency_s,
         }
         if include_records:
             out["records"] = self.records
@@ -368,11 +380,13 @@ def evaluate(
     for i, example in enumerate(examples, 1):
         error: str | None = None
         prediction = None
+        t_example = time.perf_counter()
         try:
             prediction = predict(example)
         except Exception as exc:  # noqa: BLE001 - a bad completion is a wrong answer
             error = f"{type(exc).__name__}: {exc}"
             errors += 1
+        latency_s = time.perf_counter() - t_example
         word = _predicted_word(prediction)
         if not normalize_word(word):
             empty += 1
@@ -389,6 +403,7 @@ def evaluate(
                 "predicted": word,
                 "strict": is_strict,
                 "lenient": is_lenient,
+                "latency_s": latency_s,
                 "error": error,
             }
         )

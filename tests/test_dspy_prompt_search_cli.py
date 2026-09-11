@@ -92,7 +92,9 @@ def test_estimate_calls_grows_with_candidates_and_covers_every_phase() -> None:
     assert cheap == 50 + (50 + 50 + 50)  # baseline + zero-shot + bootstrap + rescore
 
     rs = cli.parse_args(["--optimizer", "bootstrap-rs", "--num-candidates", "4", "--programs", "candidate_guided"])
-    assert cli.estimate_calls(rs, 50, 50) > cheap
+    # 4 random seeds + the 3 fixed ones BootstrapFewShotWithRandomSearch always
+    # tries, each over train + val, on top of the baseline and zero-shot passes.
+    assert cli.estimate_calls(rs, 50, 50) == 50 + 50 + 7 * 100
 
     both = cli.parse_args(["--optimizer", "bootstrap"])
     assert cli.estimate_calls(both, 50, 50) > cheap  # two programs cost more than one
@@ -177,3 +179,17 @@ def test_summarize_reports_a_final_benchmark_number_with_its_sample_size() -> No
         }
     )
     assert "n=100" in text and "88.0%" in text
+
+
+def test_an_empty_split_is_refused_before_the_lm_is_built(monkeypatch, capsys, tmp_path) -> None:
+    """A dev set too small to split is a configuration error, not a zero-length run."""
+    pytest.importorskip("dspy")
+    from spelling_reranker.dev_set import DevSet
+
+    monkeypatch.setattr(cli, "wait_for_server", lambda *a, **k: {})
+    monkeypatch.setattr(
+        cli, "load_or_build", lambda *a, **k: (DevSet(examples=[], stats={"n": 0}), tmp_path / "dev.json")
+    )
+    monkeypatch.setattr(cli, "make_budgeted_lm", lambda *a, **k: pytest.fail("built an LM for an empty dev set"))
+    assert cli.main(["--output", str(tmp_path)]) == 5
+    assert "dev set split is empty" in capsys.readouterr().err

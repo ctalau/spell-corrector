@@ -100,6 +100,13 @@ def test_evaluate_counts_strict_lenient_errors_and_empties() -> None:
     assert result.records[3]["error"].startswith("RuntimeError")
 
 
+def test_eval_result_reports_a_median_latency() -> None:
+    result = dp.evaluate(lambda ex: _pred("internet"), [_example("internet")] * 3)
+    assert result.p50_latency_s >= 0.0
+    assert result.to_dict()["p50_latency_s"] == result.p50_latency_s
+    assert all("latency_s" in record for record in result.records)
+
+
 def test_eval_result_to_dict_hides_records_by_default() -> None:
     result = dp.evaluate(lambda ex: _pred("internet"), [_example("internet")])
     payload = result.to_dict()

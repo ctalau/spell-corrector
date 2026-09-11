@@ -62,7 +62,6 @@ examples byte-for-byte. Built sets are cached under ``data/dev_set/``
 from __future__ import annotations
 
 import json
-import re
 from dataclasses import asdict, dataclass, field
 from pathlib import Path
 from typing import Iterable, Sequence

@@ -72,6 +72,11 @@ from spelling_reranker.llm_judge_cpu import build_open_messages, parse_open_word
 
 DEFAULT_SUGGESTION_CACHE = ROOT / "data" / "bea60k" / "hunspell_suggestions.json"
 
+#: The hand-written "open" mode answers with a single word and was measured at
+#: `max_new_tokens=8`. The baseline is reproduced at that budget, not at the
+#: (larger) budget DSPy needs for its field markup, so it is the same baseline.
+BASELINE_MAX_TOKENS = 8
+
 
 class BudgetExceeded(RuntimeError):
     pass
@@ -273,7 +278,7 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser.add_argument("--max-demos", type=int, default=3, help="max bootstrapped demonstrations")
     parser.add_argument("--max-labeled-demos", type=int, default=3, help="max labelled (non-bootstrapped) demonstrations")
     parser.add_argument("--num-candidates", type=int, default=4, help="candidate programs for bootstrap-rs / mipro")
-    parser.add_argument("--budget", type=int, default=4000, help="hard cap on LM calls for the whole run")
+    parser.add_argument("--budget", type=int, default=8000, help="hard cap on LM calls for the whole run")
     parser.add_argument("--num-threads", type=int, default=1, help="parallel LM calls (llama-server is started with -np 1)")
 
     parser.add_argument("--bea-dir", type=Path, default=ROOT / "data" / "bea60k")
@@ -290,7 +295,11 @@ def estimate_calls(args: argparse.Namespace, n_train: int, n_val: int) -> int:
     if args.optimizer == "bootstrap":
         per_program += n_train + n_val
     else:
-        per_program += (args.num_candidates + 1) * (n_train + n_val)
+        # BootstrapFewShotWithRandomSearch evaluates `num_candidate_programs`
+        # random seeds *plus* three fixed ones (zero-shot, labelled-demos-only,
+        # and one unshuffled bootstrap), each costing at most a bootstrap pass
+        # over the trainset and a full pass over the valset.
+        per_program += (args.num_candidates + 3) * (n_train + n_val)
     baseline = 0 if args.skip_baseline else n_val
     final = args.n_final if args.final_eval else 0
     return baseline + per_program * len(args.programs) + final
@@ -337,6 +346,13 @@ def main(argv: list[str] | None = None) -> int:
 
     trainset = dp.to_dspy_examples(train_raw)
     valset = dp.to_dspy_examples(val_raw)
+    if not trainset or not valset:
+        print(
+            f"ERROR: the dev set split is empty (train {len(trainset)}, validation {len(valset)}). "
+            "Raise --dev-size or adjust --train-fraction.",
+            file=sys.stderr,
+        )
+        return 5
 
     predicted = estimate_calls(args, len(trainset), len(valset))
     print(f"predicted LM calls <= {predicted} (budget {args.budget})", flush=True)
@@ -379,9 +395,11 @@ def main(argv: list[str] | None = None) -> int:
         server = LlamaCppModel(model_id=args.model, base_url=server_root)
         print("\nbaseline: hand-written open-mode prompt on the dev validation split", flush=True)
         baseline = dp.evaluate(
-            handwritten_baseline_predict(server, args.max_tokens), valset, progress_every=25
+            handwritten_baseline_predict(server, BASELINE_MAX_TOKENS), valset, progress_every=25
         )
-        results["baseline_handwritten"] = baseline.to_dict()
+        # One call per example, made directly over HTTP rather than through
+        # DSPy, so it is counted separately from the optimizer's LM calls.
+        results["baseline_handwritten"] = {**baseline.to_dict(), "lm_calls": baseline.n}
         print(
             f"  strict {baseline.strict_accuracy:.1%}  lenient {baseline.lenient_accuracy:.1%} "
             f"({baseline.wall_clock_s:.0f}s)",
@@ -463,6 +481,8 @@ def main(argv: list[str] | None = None) -> int:
             flush=True,
         )
 
+    #: DSPy LM calls only -- the hand-written baseline's calls are counted in
+    #: results["baseline_handwritten"]["lm_calls"].
     results["lm_calls"] = int(getattr(lm, "n_calls", -1))
     results["wall_clock_s"] = time.perf_counter() - t_start
     (args.output / "results.json").write_text(json.dumps(results, indent=2, sort_keys=True) + "\n", encoding="utf-8")
@@ -524,7 +544,8 @@ def summarize(results: dict) -> str:
     if baseline:
         lines.append(
             f"hand-written open prompt   strict {baseline['strict_accuracy']:.1%}  "
-            f"lenient {baseline['lenient_accuracy']:.1%}  (n={baseline['n']})"
+            f"lenient {baseline['lenient_accuracy']:.1%}  (n={baseline['n']}, "
+            f"p50 {baseline.get('p50_latency_s', 0.0):.2f}s)"
         )
     for name, payload in results.get("programs", {}).items():
         zero = payload["zero_shot"]
@@ -532,7 +553,8 @@ def summarize(results: dict) -> str:
         lines.append(
             f"{name:<26} zero-shot strict {zero['strict_accuracy']:.1%} -> "
             f"optimized strict {tuned['strict_accuracy']:.1%} "
-            f"(lenient {tuned['lenient_accuracy']:.1%}, {payload['description']['n_demos']} demos)"
+            f"(lenient {tuned['lenient_accuracy']:.1%}, {payload['description']['n_demos']} demos, "
+            f"p50 {tuned.get('p50_latency_s', 0.0):.2f}s)"
         )
         if payload.get("optimize_error"):
             lines.append(f"{'':<26} optimization stopped early: {payload['optimize_error']}")

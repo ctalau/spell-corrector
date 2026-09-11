@@ -21,6 +21,7 @@ from __future__ import annotations
 import re
 import time
 from dataclasses import dataclass
+from difflib import SequenceMatcher
 from typing import Sequence
 
 SYSTEM_PROMPT = (
@@ -207,12 +208,35 @@ def _prepare_inputs(loaded: LoadedModel, messages: list[dict]):
     return tok(prompt, return_tensors="pt", add_special_tokens=False).to(loaded.device)
 
 
-def generate_once(loaded: LoadedModel, messages: list[dict], *, max_new_tokens: int = 8) -> tuple[str, float]:
-    """Greedy-decode a short completion; returns (text, wall-clock seconds)."""
+def generate_once(
+    loaded: LoadedModel,
+    messages: list[dict],
+    *,
+    max_new_tokens: int = 8,
+    prompt_lookup_num_tokens: int = 0,
+) -> tuple[str, float]:
+    """Greedy-decode a short completion; returns (text, wall-clock seconds).
+
+    `prompt_lookup_num_tokens` > 0 turns on prompt-lookup speculative decoding:
+    at each step transformers drafts that many tokens by matching the last few
+    generated tokens against the prompt and copying what followed there, then
+    verifies the whole draft in a single forward pass, keeping the longest
+    prefix greedy decoding would have produced anyway. The output is therefore
+    identical to plain greedy decoding -- this is a speed setting, not a
+    behaviour setting -- and it pays off exactly when the answer copies the
+    prompt, which is what an answer mode that rewrites the input sentence does
+    (see reports/EXPERIMENT_LLM_JUDGE_CPU.md for the measured ~2-3x). It is
+    useless for the modes that emit a candidate number or a single word, since
+    there is nothing long enough to copy.
+    """
     import torch
 
     tok = loaded.tokenizer
     inputs = _prepare_inputs(loaded, messages)
+
+    extra = {}
+    if prompt_lookup_num_tokens:
+        extra["prompt_lookup_num_tokens"] = prompt_lookup_num_tokens
 
     if loaded.device.type == "cuda":
         torch.cuda.synchronize()
@@ -223,6 +247,7 @@ def generate_once(loaded: LoadedModel, messages: list[dict], *, max_new_tokens: 
             max_new_tokens=max_new_tokens,
             do_sample=False,
             pad_token_id=tok.pad_token_id if tok.pad_token_id is not None else tok.eos_token_id,
+            **extra,
         )
     if loaded.device.type == "cuda":
         torch.cuda.synchronize()
@@ -440,3 +465,116 @@ def write_latency_histogram(latencies_s: Sequence[float], out_dir, stem: str) ->
     fig.tight_layout()
     fig.savefig(out_dir / f"{stem}_latency_histogram.png", dpi=120)
     plt.close(fig)
+
+
+#: Sentence mode: the same Hunspell candidate list as index mode is shown, but
+#: instead of answering with a candidate *number*, the model rewrites the whole
+#: sentence with the typo replaced by its chosen correction, wrapped in
+#: <corrected_sentence>...</corrected_sentence>. The correction is then
+#: recovered by aligning the rewritten sentence against the original one (see
+#: `extract_corrected_word`), so the scored unit stays a single word and the
+#: numbers remain comparable with index/open mode.
+SYSTEM_PROMPT_SENTENCE = (
+    "You are an expert English spelling-correction assistant. You will be "
+    "shown a sentence with one misspelled word marked <TYPO>...</TYPO>, and "
+    "a numbered list of candidate corrections from a spell-checker, in the "
+    "spell-checker's own ranked order. Rewrite the sentence with the marked "
+    "word replaced by its best correction given the sentence context. Change "
+    "nothing else: keep every other word, its spelling, capitalisation and "
+    "punctuation exactly as given, and drop the <TYPO> and </TYPO> markers. "
+    "Reply with ONLY the rewritten sentence wrapped in "
+    "<corrected_sentence></corrected_sentence> tags and nothing else."
+)
+
+
+def build_sentence_messages(
+    context_before: str, typo: str, context_after: str, candidates: Sequence[str]
+) -> list[dict]:
+    lines = [
+        f"Sentence: {context_before}<TYPO>{typo}</TYPO>{context_after}",
+        "Candidates:",
+    ]
+    lines += [f"{i + 1}. {cand}" for i, cand in enumerate(candidates)]
+    lines.append(
+        "Answer with only <corrected_sentence>the full sentence, with the marked "
+        "word corrected</corrected_sentence>."
+    )
+    return [
+        {"role": "system", "content": SYSTEM_PROMPT_SENTENCE},
+        {"role": "user", "content": "\n".join(lines)},
+    ]
+
+
+_SENTENCE_TAG_RE = re.compile(
+    r"<corrected_sentence>(.*?)(?:</corrected_sentence>|<corrected_sentence>|$)",
+    re.DOTALL | re.IGNORECASE,
+)
+
+
+def parse_corrected_sentence(text: str) -> str | None:
+    """Pull the rewritten sentence out of the model's tagged output.
+
+    Deliberately lenient about the closing tag: an unterminated span (the
+    generation budget ran out) and a repeated *opening* tag used as the
+    terminator both still yield the sentence. Returns None only when no
+    opening tag was produced at all -- that is a genuine format failure and is
+    counted as one, not silently patched up by falling back to the raw text.
+    """
+    match = _SENTENCE_TAG_RE.search(text)
+    if not match:
+        return None
+    inner = match.group(1).strip()
+    return inner or None
+
+
+def extract_corrected_word(
+    corrected_sentence: str, context_before: str, typo: str, context_after: str
+) -> tuple[str | None, int]:
+    """Recover the single replacement word the model wrote for `typo`.
+
+    Aligns the rewritten sentence against the original one on whitespace
+    tokens -- the same tokenisation BEA-60K's own error extraction uses, so a
+    recovered token is directly comparable with the gold token. Whatever the
+    model wrote in the typo's slot (between the surviving matched tokens on
+    either side) is the answer.
+
+    Returns (word, n_span_tokens). `n_span_tokens` is how many output tokens
+    filled the typo's slot: 1 is a clean one-for-one replacement, 0 a
+    deletion (word is None), and >1 means the anchors on either side did not
+    both survive -- the model reworded or repunctuated its neighbours too, so
+    the slot swallowed them. In that last case the word returned is the token
+    in the slot closest to the typo by edit distance, which is what the model
+    actually wrote in the typo's place; `n_span_tokens` is reported alongside
+    so this recovery stays visible rather than passing as a clean parse.
+    """
+    original_tokens = (context_before + typo + context_after).split()
+    typo_start = len(context_before.split())
+    typo_end = typo_start + len(typo.split())
+    out_tokens = corrected_sentence.split()
+
+    matcher = SequenceMatcher(
+        a=[t.lower() for t in original_tokens], b=[t.lower() for t in out_tokens], autojunk=False
+    )
+    mapping: dict[int, int] = {}
+    for i, j, size in matcher.get_matching_blocks():
+        for k in range(size):
+            mapping[i + k] = j + k
+
+    # Anchor on the nearest surviving matched token on each side of the typo;
+    # everything the model put between those anchors is its replacement.
+    left = max((mapping[i] for i in range(typo_start) if i in mapping), default=-1)
+    right = min(
+        (mapping[i] for i in range(typo_end, len(original_tokens)) if i in mapping), default=len(out_tokens)
+    )
+    span = out_tokens[left + 1 : right]
+    if not span:
+        return None, 0
+    if len(span) == 1:
+        return span[0], 1
+    best = min(span, key=lambda tok: edit_distance(strip_outer_punctuation(tok), typo))
+    return best, len(span)
+
+
+def strip_outer_punctuation(word: str) -> str:
+    """Trim leading/trailing punctuation, keeping case and inner apostrophes."""
+    return word.strip(".,;:!?\"'()[]{}<>")

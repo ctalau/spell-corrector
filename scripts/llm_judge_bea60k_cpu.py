@@ -50,24 +50,75 @@ from spelling_reranker.bea60k import extract_word_errors, load_bea_pairs
 from spelling_reranker.byte_encoding import nfc
 from spelling_reranker.candidates import build_pool
 from spelling_reranker.hunspell import default_engine
+from spelling_reranker.llama_cpp_backend import load_llama_cpp
 from spelling_reranker.llm_judge_cpu import (
     beam_word_candidates,
     build_generative_messages,
     build_messages,
     build_open_messages,
+    build_sentence_messages,
+    extract_corrected_word,
     generate_once,
     latency_stats,
     load_llm,
     parse_choice,
+    parse_corrected_sentence,
     parse_open_word,
     select_by_edit_distance_and_probability,
+    strip_outer_punctuation,
     write_latency_histogram,
 )
 
 
-def build_eligible_errors(errors: list[dict], hunspell, max_candidates: int) -> tuple[list[dict], dict]:
-    """Attach Hunspell suggestions to every error; cache suggest() by typo."""
-    cache: dict[str, tuple[bool, list[str]]] = {}
+def _suggestion_cache_key(hunspell) -> str:
+    """Identity of the dictionary the cached suggestions came from.
+
+    BEA-60K is a locked benchmark, so a stale cache would silently change what
+    is being measured. Keying on the .dic/.aff hashes means a different or
+    updated dictionary simply misses the cache instead of being scored against
+    another dictionary's suggestions.
+    """
+    hashes = hunspell.metadata().get("dictionary_hashes", {})
+    return json.dumps({name: entry.get("sha256") for name, entry in sorted(hashes.items())}, sort_keys=True)
+
+
+def load_suggestion_cache(path: Path | None, hunspell) -> dict[str, tuple[bool, list[str]]]:
+    """Per-typo (flagged, suggestions) memo from a previous run, if it matches."""
+    if path is None or not path.is_file():
+        return {}
+    try:
+        payload = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        return {}
+    if payload.get("dictionary_key") != _suggestion_cache_key(hunspell):
+        return {}
+    return {typo: (bool(flagged), list(sugg)) for typo, (flagged, sugg) in payload.get("entries", {}).items()}
+
+
+def save_suggestion_cache(path: Path | None, hunspell, cache: dict[str, tuple[bool, list[str]]]) -> None:
+    if path is None:
+        return
+    path.parent.mkdir(parents=True, exist_ok=True)
+    payload = {
+        "dictionary_key": _suggestion_cache_key(hunspell),
+        "hunspell_metadata": hunspell.metadata(),
+        "entries": {typo: [flagged, sugg] for typo, (flagged, sugg) in cache.items()},
+    }
+    tmp = path.with_suffix(path.suffix + ".tmp")
+    tmp.write_text(json.dumps(payload), encoding="utf-8")
+    tmp.replace(path)
+
+
+def build_eligible_errors(
+    errors: list[dict], hunspell, max_candidates: int, cache: dict | None = None
+) -> tuple[list[dict], dict]:
+    """Attach Hunspell suggestions to every error; memoize suggest() by typo.
+
+    `cache` is that memo, passed in so a caller can persist it: the pass over
+    all ~68k BEA errors costs minutes and is identical on every run, while the
+    scored sample is usually 100 examples.
+    """
+    cache = {} if cache is None else cache
     n_flagged = 0
     for err in errors:
         typo = err["typo"]
@@ -101,6 +152,9 @@ def run_phase(
     max_examples: int | None,
     beam_width: int = 3,
     edit_distance_weight: float = 1.0,
+    sentence_token_headroom: int = 32,
+    sentence_max_new_tokens_cap: int = 320,
+    prompt_lookup_num_tokens: int = 0,
 ) -> dict:
     predictions: list[dict] = []
     latencies: list[float] = []
@@ -134,21 +188,63 @@ def run_phase(
             choice = None
             chosen_word = chosen["word"] if chosen else None
             beam_info = ranked
+            sentence_info = None
         else:
-            if mode == "open":
-                messages = build_open_messages(
-                    err["context_before"], err["typo"], err["context_after"], err["candidates"]
-                )
-            else:
-                messages = build_messages(
-                    err["context_before"], err["typo"], err["context_after"], err["candidates"]
+            builder = {
+                "open": build_open_messages,
+                "sentence": build_sentence_messages,
+            }.get(mode, build_messages)
+            messages = builder(
+                err["context_before"], err["typo"], err["context_after"], err["candidates"]
+            )
+            # Sentence mode has to emit the whole sentence, not a number or a
+            # single word, so the 8-token budget the other modes use would
+            # truncate every answer. Size the budget per example from the
+            # sentence's own token count instead of picking one global number
+            # that is wasteful for short sentences and still too small for
+            # long ones.
+            budget = max_new_tokens
+            # Prompt-lookup speculative decoding only helps a mode whose answer
+            # copies most of its prompt back, so it is enabled for sentence
+            # mode alone; it does not change what is generated (see
+            # generate_once), only how many forward passes that costs.
+            lookup = prompt_lookup_num_tokens if mode == "sentence" else 0
+            if mode == "sentence":
+                sentence = err["context_before"] + err["typo"] + err["context_after"]
+                budget = min(
+                    _count_tokens(loaded, sentence) + sentence_token_headroom, sentence_max_new_tokens_cap
                 )
             try:
-                text, latency = generate_once(loaded, messages, max_new_tokens=max_new_tokens)
+                if hasattr(loaded, "generate"):  # llama.cpp backend
+                    text, latency = loaded.generate(messages, max_new_tokens=budget)
+                else:
+                    text, latency = generate_once(
+                        loaded, messages, max_new_tokens=budget, prompt_lookup_num_tokens=lookup
+                    )
             except Exception as exc:  # noqa: BLE001
                 predictions.append({**_slim(err), "error": str(exc)})
                 continue
-            if mode == "open":
+            sentence_info = None
+            if mode == "sentence":
+                choice = None
+                corrected_sentence = parse_corrected_sentence(text)
+                if corrected_sentence is None:
+                    chosen_word, span_tokens = None, 0
+                else:
+                    chosen_word, span_tokens = extract_corrected_word(
+                        corrected_sentence,
+                        err["context_before"],
+                        err["typo"],
+                        err["context_after"],
+                    )
+                sentence_info = {
+                    "corrected_sentence": corrected_sentence,
+                    "tag_parse_failed": corrected_sentence is None,
+                    "replacement_span_tokens": span_tokens,
+                    "max_new_tokens": budget,
+                    "prompt_lookup_num_tokens": lookup,
+                }
+            elif mode == "open":
                 choice = None
                 chosen_word = parse_open_word(text)
             else:
@@ -157,6 +253,14 @@ def run_phase(
             beam_info = None
 
         correct = chosen_word is not None and nfc(chosen_word) == err["gold_n"]
+        # Sentence mode is the only mode whose answer can pick up sentence
+        # punctuation ("thirst." for gold "thirst"); tracked separately so a
+        # tokenisation artifact is visible instead of quietly inflating or
+        # deflating the headline number, which stays the strict one every
+        # other mode is scored by.
+        correct_depunctuated = chosen_word is not None and nfc(
+            strip_outer_punctuation(chosen_word)
+        ) == nfc(strip_outer_punctuation(err["gold"]))
         latencies.append(latency)
         predictions.append(
             {
@@ -167,7 +271,9 @@ def run_phase(
                 "chosen_word_in_pool": chosen_word is not None
                 and any(nfc(chosen_word) == nfc(c) for c in err["candidates"]),
                 "beam_candidates": beam_info,
+                "sentence": sentence_info,
                 "correct": correct,
+                "correct_depunctuated": correct_depunctuated,
                 "latency_s": latency,
             }
         )
@@ -187,6 +293,11 @@ def run_phase(
     outside_pool_correct = sum(1 for p in outside_pool if p.get("correct"))
     not_in_pool = [p for p in predictions if not p.get("gold_in_pool")]
     not_in_pool_correct = sum(1 for p in not_in_pool if p.get("correct"))
+    n_correct_depunct = sum(1 for p in predictions if p.get("correct_depunctuated"))
+    tag_failures = sum(1 for p in predictions if (p.get("sentence") or {}).get("tag_parse_failed"))
+    multiword_spans = sum(
+        1 for p in predictions if ((p.get("sentence") or {}).get("replacement_span_tokens") or 0) > 1
+    )
     return {
         "n_requested": n_scored,
         "n_ok": len(latencies),
@@ -195,6 +306,9 @@ def run_phase(
         "elapsed_seconds": elapsed,
         "throughput_qps": (len(latencies) / elapsed) if elapsed > 0 else None,
         "overall_accuracy": (n_correct / n_scored) if n_scored else None,
+        "overall_accuracy_depunctuated": (n_correct_depunct / n_scored) if n_scored else None,
+        "n_sentence_tag_parse_failures": tag_failures,
+        "n_sentence_multiword_replacements": multiword_spans,
         "conditional_accuracy": (cond_correct / len(cond_pool)) if cond_pool else None,
         "n_gold_in_pool": len(cond_pool),
         "hunspell_top1_accuracy_on_sample": (hunspell_top1_on_sample / n_scored) if n_scored else None,
@@ -205,6 +319,13 @@ def run_phase(
         "predictions": predictions,
         "_latencies": latencies,
     }
+
+
+def _count_tokens(loaded, text: str) -> int:
+    """Token count from whichever backend is loaded (both tokenize natively)."""
+    if hasattr(loaded, "n_tokens"):  # llama.cpp backend, via the server's /tokenize
+        return loaded.n_tokens(text)
+    return len(loaded.tokenizer(text, add_special_tokens=False)["input_ids"])
 
 
 def _fmt(value, spec: str) -> str:
@@ -225,11 +346,43 @@ def _slim(err: dict) -> dict:
 
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
+    parser.add_argument(
+        "--backend",
+        choices=("transformers", "llama-cpp"),
+        default="transformers",
+        help="'transformers': the bf16 checkpoint through PyTorch (default). 'llama-cpp': a "
+        "quantized GGUF served by llama.cpp's llama-server -- far faster per call on CPU, but "
+        "quantization changes the model's answers, so accuracy must be re-measured rather than "
+        "carried over from a bf16 run.",
+    )
+    parser.add_argument("--gguf", type=Path, help="GGUF path (required for --backend llama-cpp)")
+    parser.add_argument(
+        "--llama-server-binary",
+        type=Path,
+        help="path to llama.cpp's llama-server binary (required for --backend llama-cpp)",
+    )
+    parser.add_argument("--llama-server-port", type=int, default=8080)
+    parser.add_argument(
+        "--llama-threads", type=int, default=None, help="llama-server -t; default lets llama.cpp choose"
+    )
     parser.add_argument("--model-id", required=True, help="HF model id, e.g. Qwen/Qwen3.5-0.8B")
     parser.add_argument("--model-name", required=True, help="short label for output paths/reports")
     parser.add_argument("--bea-dir", type=Path, default=ROOT / "data" / "bea60k")
     parser.add_argument("--output", type=Path, required=True)
     parser.add_argument("--seed", type=int, default=1337)
+    parser.add_argument(
+        "--suggestion-cache",
+        type=Path,
+        default=ROOT / "data" / "bea60k" / "hunspell_suggestions.json",
+        help="per-typo Hunspell spell()/suggest() memo, reused across runs. Keyed on the "
+        "dictionary's .dic/.aff hashes, so a different dictionary misses rather than "
+        "silently reusing another one's suggestions. Lives beside the (untracked) BEA files.",
+    )
+    parser.add_argument(
+        "--no-suggestion-cache",
+        action="store_true",
+        help="always re-query Hunspell for every BEA error and do not write the cache",
+    )
     parser.add_argument("--n-samples", type=int, default=100)
     parser.add_argument("--time-budget-seconds", type=float, default=300.0)
     parser.add_argument("--max-candidates", type=int, default=8)
@@ -237,15 +390,28 @@ def main() -> int:
     parser.add_argument("--dtype", default="auto", help="'auto' -> bfloat16 (memory-safe on CPU too)")
     parser.add_argument(
         "--answer-mode",
-        choices=("index", "open", "beam"),
+        choices=("index", "open", "beam", "sentence"),
         default="index",
         help="'index': pick a candidate number (default). 'open': same prompt/candidates "
         "shown as a hint, but the model may write any word, not just one of them. "
         "'beam': no Hunspell candidates shown -- the model's own beam search "
         "(--beam-width) generates candidate words, reranked by edit distance to "
-        "the typo and log-probability (--edit-distance-weight).",
+        "the typo and log-probability (--edit-distance-weight). "
+        "'sentence': same candidate list as 'index', but the model rewrites the "
+        "whole sentence with the typo replaced by the corrected word, wrapped in "
+        "<corrected_sentence></corrected_sentence>; the correction is recovered by "
+        "aligning that rewrite against the original sentence.",
     )
     parser.add_argument("--beam-width", type=int, default=3, help="only used by --answer-mode beam")
+    parser.add_argument(
+        "--prompt-lookup-tokens",
+        type=int,
+        default=10,
+        help="only used by --answer-mode sentence: prompt-lookup speculative decoding draft "
+        "length. The rewritten sentence is mostly a copy of the prompt, so drafting that many "
+        "tokens from the prompt and verifying them in one forward pass cuts per-call latency "
+        "~2-3x with output identical to plain greedy decoding. 0 disables it.",
+    )
     parser.add_argument(
         "--edit-distance-weight",
         type=float,
@@ -255,12 +421,30 @@ def main() -> int:
     parser.add_argument("--skip-timed", action="store_true", help="only run the fixed n-samples phase")
     args = parser.parse_args()
 
+    if args.backend == "llama-cpp" and args.answer_mode == "beam":
+        raise SystemExit(
+            "--answer-mode beam needs per-token logprobs and beam search from transformers; "
+            "llama.cpp's server does not expose them. Use --backend transformers for beam mode."
+        )
+
     args.output.mkdir(parents=True, exist_ok=True)
 
     pairs = load_bea_pairs(args.bea_dir)
     errors = extract_word_errors(pairs)
     hunspell = default_engine()
-    errors, hunspell_meta = build_eligible_errors(errors, hunspell, args.max_candidates)
+    cache_path = None if args.no_suggestion_cache else args.suggestion_cache
+    suggestion_cache = load_suggestion_cache(cache_path, hunspell)
+    n_cached = len(suggestion_cache)
+    t_hunspell0 = time.perf_counter()
+    errors, hunspell_meta = build_eligible_errors(errors, hunspell, args.max_candidates, suggestion_cache)
+    hunspell_seconds = time.perf_counter() - t_hunspell0
+    if len(suggestion_cache) > n_cached:
+        save_suggestion_cache(cache_path, hunspell, suggestion_cache)
+    print(
+        f"hunspell pass {hunspell_seconds:.1f}s "
+        f"({n_cached} typos from cache, {len(suggestion_cache) - n_cached} newly queried)",
+        flush=True,
+    )
 
     eligible = [i for i, e in enumerate(errors) if e["hunspell_flagged"] and e["candidates"]]
     if not eligible:
@@ -287,18 +471,32 @@ def main() -> int:
         "dtype": args.dtype,
         "answer_mode": args.answer_mode,
         "beam_width": args.beam_width if args.answer_mode == "beam" else None,
+        "prompt_lookup_tokens": args.prompt_lookup_tokens if args.answer_mode == "sentence" else None,
         "edit_distance_weight": args.edit_distance_weight if args.answer_mode == "beam" else None,
         "bea_n_word_errors": hunspell_meta["n_word_errors"],
         "bea_n_hunspell_flagged": hunspell_meta["n_hunspell_flagged"],
         "bea_n_eligible": len(eligible),
+        "hunspell_pass_seconds": hunspell_seconds,
+        "hunspell_cache_hits": n_cached,
         "hunspell_metadata": hunspell.metadata(),
         "python": platform.python_version(),
     }
 
-    print(f"loading {args.model_id} ...", flush=True)
+    print(f"loading {args.model_id} via {args.backend} ...", flush=True)
     t_load0 = time.perf_counter()
     try:
-        loaded = load_llm(args.model_id, dtype=args.dtype)
+        if args.backend == "llama-cpp":
+            if not args.gguf or not args.llama_server_binary:
+                raise SystemExit("--backend llama-cpp requires --gguf and --llama-server-binary")
+            loaded = load_llama_cpp(
+                args.gguf,
+                server_binary=args.llama_server_binary,
+                port=args.llama_server_port,
+                n_threads=args.llama_threads,
+                log_path=args.output / "llama_server.log",
+            )
+        else:
+            loaded = load_llm(args.model_id, dtype=args.dtype)
     except Exception as exc:  # noqa: BLE001
         (args.output / "results.json").write_text(
             json.dumps({**meta, "load_error": str(exc), "traceback": traceback.format_exc()}, indent=2) + "\n",
@@ -308,18 +506,23 @@ def main() -> int:
         return 1
     load_seconds = time.perf_counter() - t_load0
 
-    import torch
-    import transformers
-
     meta["load_seconds"] = load_seconds
     meta["load_class"] = loaded.load_class
     meta["device"] = str(loaded.device)
-    meta["torch_version"] = torch.__version__
-    meta["transformers_version"] = transformers.__version__
+    meta["backend"] = args.backend
     meta["supports_system_role"] = loaded.supports_system_role
     meta["supports_enable_thinking"] = loaded.supports_enable_thinking
-    if loaded.device.type == "cuda":
-        meta["gpu_name"] = torch.cuda.get_device_name(0)
+    if args.backend == "llama-cpp":
+        meta["llama_server"] = loaded.server_metadata
+        meta["gguf_path"] = str(args.gguf)
+    else:
+        import torch
+        import transformers
+
+        meta["torch_version"] = torch.__version__
+        meta["transformers_version"] = transformers.__version__
+        if loaded.device.type == "cuda":
+            meta["gpu_name"] = torch.cuda.get_device_name(0)
 
     # Warm up: first call pays for CUDA kernel compilation / cache warming and
     # is excluded from every latency stat below.
@@ -332,11 +535,26 @@ def main() -> int:
             loaded, warm_messages, beam_width=args.beam_width, max_new_tokens=args.max_new_tokens
         )
     else:
-        warm_builder = build_open_messages if args.answer_mode == "open" else build_messages
+        warm_builder = {
+            "open": build_open_messages,
+            "sentence": build_sentence_messages,
+        }.get(args.answer_mode, build_messages)
         warm_messages = warm_builder(
             warm_err["context_before"], warm_err["typo"], warm_err["context_after"], warm_err["candidates"]
         )
-        _, warmup_latency = generate_once(loaded, warm_messages, max_new_tokens=args.max_new_tokens)
+        warm_budget = args.max_new_tokens
+        if args.answer_mode == "sentence":
+            warm_sentence = warm_err["context_before"] + warm_err["typo"] + warm_err["context_after"]
+            warm_budget = min(_count_tokens(loaded, warm_sentence) + 32, 320)
+        if hasattr(loaded, "generate"):
+            _, warmup_latency = loaded.generate(warm_messages, max_new_tokens=warm_budget)
+        else:
+            _, warmup_latency = generate_once(
+                loaded,
+                warm_messages,
+                max_new_tokens=warm_budget,
+                prompt_lookup_num_tokens=args.prompt_lookup_tokens if args.answer_mode == "sentence" else 0,
+            )
     meta["warmup_latency_s"] = warmup_latency
     print(f"loaded in {load_seconds:.1f}s (warmup call {warmup_latency * 1000:.0f}ms)", flush=True)
 
@@ -351,6 +569,7 @@ def main() -> int:
         max_examples=len(sample_100),
         beam_width=args.beam_width,
         edit_distance_weight=args.edit_distance_weight,
+        prompt_lookup_num_tokens=args.prompt_lookup_tokens,
     )
     write_latency_histogram(phase1["_latencies"], args.output, "sample100")
     (args.output / "predictions_sample100.jsonl").write_text(
@@ -375,6 +594,7 @@ def main() -> int:
             max_examples=None,
             beam_width=args.beam_width,
             edit_distance_weight=args.edit_distance_weight,
+            prompt_lookup_num_tokens=args.prompt_lookup_tokens,
         )
         write_latency_histogram(phase2["_latencies"], args.output, "timed")
         (args.output / "predictions_timed.jsonl").write_text(
@@ -390,6 +610,9 @@ def main() -> int:
 
     phase1.pop("predictions", None)
     phase1.pop("_latencies", None)
+
+    if hasattr(loaded, "stop"):
+        loaded.stop()
 
     results = {**meta, "sample_100": phase1, "timed_5min": phase2}
     (args.output / "results.json").write_text(json.dumps(results, indent=2) + "\n", encoding="utf-8")

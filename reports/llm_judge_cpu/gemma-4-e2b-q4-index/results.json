@@ -1,0 +1,108 @@
+{
+  "model_id": "google/gemma-4-E2B-it-qat-q4_0-gguf",
+  "model_name": "gemma-4-e2b-q4-index",
+  "seed": 1337,
+  "n_samples": 100,
+  "time_budget_seconds": 300.0,
+  "max_candidates": 8,
+  "max_new_tokens": 8,
+  "dtype": "auto",
+  "answer_mode": "index",
+  "beam_width": null,
+  "prompt_lookup_tokens": null,
+  "edit_distance_weight": null,
+  "bea_n_word_errors": 68429,
+  "bea_n_hunspell_flagged": 67877,
+  "bea_n_eligible": 67844,
+  "hunspell_pass_seconds": 0.295340667000346,
+  "hunspell_cache_hits": 30179,
+  "hunspell_metadata": {
+    "hunspell_cli_version": "@(#) International Ispell Version 3.2.06 (but really Hunspell 1.7.2)",
+    "python_binding": "/home/user/spell-corrector/.venv/lib/python3.11/site-packages/hunspell.cpython-311-x86_64-linux-gnu.so",
+    "dictionary_package": "hunspell-en-us",
+    "dictionary_paths": {
+      "dic": "/usr/share/hunspell/en_US.dic",
+      "aff": "/usr/share/hunspell/en_US.aff"
+    },
+    "dictionary_hashes": {
+      "en_US.dic": {
+        "path": "/usr/share/hunspell/en_US.dic",
+        "sha256": "829a043cf078d1e80e886289a13823454977f442a239a859d2133ea61944aa60",
+        "size": 860381
+      },
+      "en_US.aff": {
+        "path": "/usr/share/hunspell/en_US.aff",
+        "sha256": "70fe5778717d097ce2f3326baaa5c1e4d2206d81a5a81d3ea8e11c4770806dd5",
+        "size": 3131
+      }
+    },
+    "os": {
+      "system": "Linux",
+      "release": "6.18.44-fc-v24",
+      "platform": "Linux-6.18.44-fc-v24-x86_64-with-glibc2.39",
+      "python": "3.11.15"
+    }
+  },
+  "python": "3.11.15",
+  "load_seconds": 3.0134545640003125,
+  "load_class": "llama.cpp/llama-server",
+  "device": "cpu",
+  "backend": "llama-cpp",
+  "supports_system_role": true,
+  "supports_enable_thinking": false,
+  "llama_server": {
+    "command": [
+      "/tmp/claude-0/-home-user-spell-corrector/f50bc621-c5b7-51fc-a6cb-84bd35292f1e/scratchpad/llama.cpp/build/bin/llama-server",
+      "-m",
+      "/root/.cache/huggingface/hub/models--google--gemma-4-E2B-it-qat-q4_0-gguf/snapshots/675cff42a74c774d6cb76f76d8eacb49b48c9b93/gemma-4-E2B_q4_0-it.gguf",
+      "--host",
+      "127.0.0.1",
+      "--port",
+      "8099",
+      "-c",
+      "4096",
+      "--reasoning",
+      "off",
+      "-np",
+      "1",
+      "-t",
+      "4"
+    ],
+    "model_path": "/root/.cache/huggingface/hub/models--google--gemma-4-E2B-it-qat-q4_0-gguf/snapshots/675cff42a74c774d6cb76f76d8eacb49b48c9b93/gemma-4-E2B_q4_0-it.gguf",
+    "n_ctx": 4096,
+    "chat_template_from_gguf": true,
+    "reasoning": "off"
+  },
+  "gguf_path": "/root/.cache/huggingface/hub/models--google--gemma-4-E2B-it-qat-q4_0-gguf/snapshots/675cff42a74c774d6cb76f76d8eacb49b48c9b93/gemma-4-E2B_q4_0-it.gguf",
+  "warmup_latency_s": 1.4304158459999599,
+  "sample_100": {
+    "n_requested": 100,
+    "n_ok": 100,
+    "n_errors_raised": 0,
+    "n_no_answer": 0,
+    "elapsed_seconds": 82.08249054499993,
+    "throughput_qps": 1.21828662039899,
+    "overall_accuracy": 0.81,
+    "overall_accuracy_depunctuated": 0.81,
+    "n_sentence_tag_parse_failures": 0,
+    "n_sentence_multiword_replacements": 0,
+    "conditional_accuracy": 0.9759036144578314,
+    "n_gold_in_pool": 83,
+    "hunspell_top1_accuracy_on_sample": 0.59,
+    "n_chosen_outside_pool": 0,
+    "n_chosen_outside_pool_correct": 0,
+    "accuracy_when_gold_outside_pool": 0.0,
+    "latency_stats": {
+      "n": 100,
+      "mean_ms": 820.7758240900149,
+      "stdev_ms": 174.31226438906654,
+      "min_ms": 158.41191299978163,
+      "p50_ms": 743.9498449998609,
+      "p90_ms": 965.9707859003447,
+      "p95_ms": 989.468899200142,
+      "p99_ms": 1195.9581836001748,
+      "max_ms": 1465.7490829999915
+    }
+  },
+  "timed_5min": null
+}

@@ -195,6 +195,274 @@ shared-KV bookkeeping not being especially optimized for batched beam search on
 CPU. Neither number should be read as "mode X is N times slower than mode Y" in
 general; both are one-off measurements on a noisy shared box.
 
+## Follow-up: rewrite the whole sentence instead of answering with an index
+
+A fourth answer mode (`--answer-mode sentence`, `build_sentence_messages` /
+`parse_corrected_sentence` / `extract_corrected_word`) keeps everything index mode
+does -- the same fixed 100-example sample, the same Hunspell top-8 candidate list in
+the same order, greedy decoding, no beam search -- and changes only the answer
+format: instead of replying with a candidate *number*, the model replies with the
+whole sentence, typo replaced by the corrected word, wrapped in
+`<corrected_sentence></corrected_sentence>`. The correction is then recovered by
+aligning the rewritten sentence against the original on whitespace tokens (the same
+tokenisation BEA-60K's own error extraction uses), so the scored unit stays a single
+word and the number stays comparable with the other three modes.
+
+Two harness details this mode forced:
+
+- **Per-example generation budget.** The other modes generate ≤8 tokens; a whole
+  sentence needs far more. The budget is sized per example as the sentence's own
+  token count + 32, capped at 320 (mean 53 tokens on this sample).
+- **Deletions, multi-token spans and missing tags are recorded, not swallowed.**
+  `replacement_span_tokens` says how many output tokens landed in the typo's slot
+  (1 = clean replacement, 0 = the model deleted the word, >1 = the anchors on one
+  side did not survive because the model also reworded/repunctuated its neighbours).
+
+### Results (same 100-example sample, gemma-4-E2B-it, this box)
+
+| | Index (candidate number) | Sentence (whole-sentence rewrite) |
+|---|---|---|
+| Overall accuracy, strict | 83.0% | **73.0%** |
+| Overall accuracy, ignoring surrounding punctuation | 83.0% | **88.0%** |
+| Overall accuracy, ignoring punctuation *and* case | 84.0% | **90.0%** |
+| Conditional accuracy (gold was offered, 83/100) | 100% | 83.1% |
+| Accuracy when gold was *not* offered (17/100) | 0% (impossible by construction) | 23.5% |
+| Format failures (no `<corrected_sentence>` tag) | -- | 0/100 |
+| p50 latency | 783ms | 5,980ms |
+| p99 latency | 901ms | 16,280ms |
+| Wall clock for the 100 examples | 78s | 693s |
+
+The index-mode column is a **rerun on this box**, not the earlier table's numbers, so
+the latency comparison is like-for-like on the same hardware and the same day. It
+reproduced the original run's 83.0%/100% accuracy exactly.
+
+### Where the 27 strict errors come from
+
+The strict number is misleading on its own, and the reason is a single, systematic
+artifact rather than 27 independent judgement failures:
+
+- **15 of 27 are punctuation attachment.** BEA-60K text is pre-tokenised
+  (`Now I must buy it on the interenet .`, `I do n't have a clue about anthing .`).
+  Told to rewrite the sentence, gemma-4-E2B-it writes *natural* English and
+  re-attaches the punctuation: `... on the internet.` The recovered token is then
+  `internet.` where gold is `internet`. The correction itself is right in every one
+  of these 15 cases. **73 of the 100 rewritten sentences come back reflowed this way**
+  despite the prompt explicitly saying to keep every other word, its spelling,
+  capitalisation and punctuation exactly as given -- this is not an occasional slip,
+  it is the model's default behaviour on pre-tokenised input.
+- **2 of 27 are case normalisation**: `englsh` -> `english` (gold `English`),
+  `Goog` -> `good` (gold `Good`, and the rewrite mangled the opening into
+  `Go good summer vacations !`). Same root cause: the model is rewriting prose, not
+  performing a constrained substitution.
+- **10 of 27 are genuine word choices**, and most are cases the other modes miss too:
+  `commonder` -> `commoner` (index mode got `commander` -- the one real regression
+  besides `Goog`), `Miken` -> `Mike` (gold `McCain`, unreachable), `thursty` ->
+  `thirsty` (gold `thirst`; index also wrong, open mode got it), `Thanx` -> `Thank`
+  (gold `Thanks`), `pollusions` -> `pollutions` (gold `pollutants`), `catacumbas` ->
+  `catacombs` (gold `catacomb`), `vacab` -> `vocab` (gold `vocabulary`), `dialoging`
+  echoed unchanged (gold `talking` -- a lexical rewrite, not a spelling fix). Two of
+  the ten are **BEA gold noise**, where the model's answer is arguably better than
+  the reference: `crimbimg` -> `climbing` (gold is `climbimg`, itself misspelled) and
+  `studiant` -> `student` (gold is `studant`).
+
+Comparing index-right/sentence-wrong pairs directly: 14 examples flipped from right
+to wrong, and **12 of those 14 are punctuation-only**. Only `commonder` and `Goog`
+are real degradations. In the other direction, sentence mode gets 4 examples index
+mode misses, all of them cases where the gold correction was never in Hunspell's
+list -- rewriting the sentence lets the model leave the candidate list, which
+forced-choice index mode cannot do (`restrunt` -> `restaurant`, `sespend` ->
+`suspension`, `wetty` -> `wet`, `crimbimg` -> `climbing`).
+
+**So the honest reading is punctuation-insensitive: 88.0%.** On that basis sentence
+mode beats index mode (83.0%) and ties beam mode (88.0%), and sits just under open
+mode (90.0%); ignoring case as well, sentence and open mode are level at 90.0%.
+Sentence mode's *conditional* accuracy (83.1% strict) is well below index mode's
+100%, but that gap too is mostly the same artifact -- the model rarely disagrees
+with a gold correction that Hunspell offered, it just re-punctuates around it.
+
+**The cost is latency, and it is large.** p50 goes 783ms -> 5,980ms (7.6x), p99
+901ms -> 16,280ms (18x), worst case 23.4s on the sample's longest sentence. That is
+inherent, not an artifact: the model emits ~53 tokens instead of ≤8, at a measured
+~126ms per generated token on this 4-vCPU box, and the whole-sentence output makes
+per-call latency scale with sentence length rather than staying flat. All 100 calls
+landed above 2s and 75 of them above 5s -- there is no overlap at all with index
+mode's tight 683-916ms band.
+
+### Revised prompt options
+
+Ranked by what they fix, given that the dominant failure is output-format fidelity
+rather than spelling judgement:
+
+1. **Sentence rewrite plus an explicit word field** (recommended). Keep the rewrite
+   as the model's reasoning surface but add a second tag it must fill with just the
+   replacement token: `<corrected_sentence>...</corrected_sentence><corrected_word>internet</corrected_word>`,
+   and score the word field. This removes alignment entirely -- no anchors, no span
+   heuristics, no punctuation attachment -- while keeping whatever benefit writing
+   the sentence gives. Expected to convert most of the 15 punctuation errors
+   directly into correct answers, at a few extra tokens of latency.
+2. **Keep the correction marked inside the rewrite**:
+   `<corrected_sentence>Now I must buy it on the <corrected>internet</corrected> .</corrected_sentence>`.
+   Same robustness benefit as (1) with one tag pair instead of two, and it forces the
+   model to point at the slot it changed, which also catches the `Goog` -> `Go good`
+   class of mangled rewrite. Slightly more likely to be dropped by a small model
+   mid-sentence than a trailing field is.
+3. **Teach the tokenisation explicitly, with a one-shot example.** State that the
+   input is pre-tokenised and that spacing must be reproduced byte-for-byte, and show
+   one input/output pair that keeps ` .` and `do n't` intact. Cheapest change, no
+   format risk, but it fights the model's strong prior toward natural prose -- worth
+   testing precisely because 73/100 reflowed under an instruction that already said
+   this in words.
+4. **Add a case/inflection guardrail** to whichever of the above is chosen: keep the
+   original capitalisation unless the word is a proper noun, and keep the word's
+   number/tense unless context demands otherwise. Targets `english`/`good` (2 cases)
+   and arguably `Thank`/`catacombs` (2 more).
+5. **Shrink the rewrite to a window.** Ask for only the corrected word plus two words
+   of context on each side rather than the whole sentence. Recovers most of the
+   latency (output length stops scaling with sentence length) while keeping the
+   "write it in context" framing. Weaker than (1)/(2) on fidelity, and long-range
+   context stops being in the *output* though it is still in the prompt.
+6. **Non-prompt alternative, for completeness**: constrain decoding to copy the input
+   tokens verbatim outside the typo slot. This eliminates the entire failure class by
+   construction rather than by instruction, but it is a decoding change, not a prompt
+   change, and it gives up the sentence-level fluency signal that lets the model
+   escape Hunspell's list.
+
+Options (1) and (2) are the ones worth running next; both are cheap, and either
+would let the strict number be read directly instead of through a
+punctuation-insensitive lens.
+
+## Follow-up: making it fast -- prompt-lookup decoding, then q4_0 + llama.cpp
+
+Sentence mode's 5,980ms median (above) made iteration painful, so the cost was
+measured rather than guessed. Fitting latency against generated-token count over
+the 100-example run gives:
+
+```
+latency ≈ 0.64s fixed + 215ms per generated token   (bf16, transformers, 4 vCPU)
+```
+
+It is entirely decode-bound. Nothing ever hit the per-example token cap, so the
+budget was never the constraint -- the token *count* was: ~29 generated tokens per
+call versus ~1 in index mode. Two thirds of that is avoidable overhead: the tag
+names `<corrected_sentence>` and `</corrected_sentence>` cost 5 tokens each (10 of
+the 29), and the sentence body is a near-verbatim copy of text already sitting in
+the prompt, regenerated one token at a time at full model cost.
+
+### Fix 1: prompt-lookup speculative decoding (output-identical)
+
+Because the answer copies the prompt, transformers' `prompt_lookup_num_tokens`
+applies directly: draft N tokens by matching the tail of the generation against the
+prompt, verify the whole draft in one forward pass, keep the prefix greedy decoding
+would have produced anyway. It is a speed setting, not a behaviour setting -- the
+output is identical to plain greedy by construction.
+
+Measured in-process on 10-12 examples of the same sample:
+
+| Variant | Mean latency/call | Output identical to greedy |
+|---|---|---|
+| greedy (baseline) | 6.95s | -- |
+| lookup, draft 5 | 3.58s | 10/10 |
+| **lookup, draft 10** | **3.29s** | 10/10 |
+| lookup, draft 10, 3-grams | 3.20s | 10/10 |
+| lookup, draft 16 | 3.31s | 10/10 |
+| lookup, draft 24 | 3.36s | 10/10 |
+
+Gains plateau at a draft length of 10, which is the default; every setting tried
+reproduced greedy output exactly. Also tried and rejected: prefilling the opening
+tag into the assistant turn and stopping at `</` saves the 10 tag tokens (6.48s) but
+leaves a dangling `</` in the recovered word, and it is redundant once lookup is on
+-- lookup drafts the tag tokens from the prompt too. **These numbers are from a
+12-example micro-benchmark; the full 100-example rerun was interrupted, so the
+harness default is validated but not yet re-scored end-to-end at this setting.**
+
+### Fix 2: q4_0 GGUF served by llama.cpp (the current default for new runs)
+
+`--backend llama-cpp` (`spelling_reranker/llama_cpp_backend.py`) serves
+`google/gemma-4-E2B-it-qat-q4_0-gguf` -- Google's **quantization-aware-trained**
+q4_0 build, 3.35GB of text weights -- through `llama-server`, over its
+OpenAI-compatible endpoint. The GGUF's own chat template renders the prompt and the
+server's `/tokenize` sizes the per-example budget, so nothing is reconstructed from
+a second tokenizer.
+
+Unlike fix 1, **quantization changes the model's answers**, so all three portable
+answer modes were re-scored from scratch on the same fixed 100-example sample rather
+than inheriting the bf16 numbers:
+
+| Mode | bf16 strict | q4_0 strict | bf16 punct-insensitive | q4_0 punct-insensitive | bf16 p50 | q4_0 p50 |
+|---|---|---|---|---|---|---|
+| Index | 83.0% | 81.0% | 83.0% | 81.0% | 783ms&#42; | 744ms |
+| Open | 90.0% | 87.0% | 90.0% | 87.0% | (not comparable)&#42;&#42; | 960ms |
+| Sentence | 73.0% | 66.0% | 88.0% | 86.0% | 5,980ms | **2,118ms** |
+
+&#42; Same-box bf16 index rerun, not the earlier table's 632ms from another session.
+&#42;&#42; The bf16 open-mode run hit the disk-I/O stall documented above (10.2s median),
+so no honest speedup ratio can be quoted against it.
+
+**The trustworthy speedup is sentence mode's 2.8x** (5,980ms -> 2,118ms, both clean
+measurements on this box), and it beats fix 1's ~3.2s as well. Index mode gets
+nothing, for a good reason: it generates about one token, so its latency is almost
+all prompt processing, which quantization barely helps on CPU.
+
+**What q4_0 costs in accuracy is small but one-directional.** Per-example
+agreement with bf16 is 97% (index), 96% (open), 88% (sentence), and the discordant
+pairs go almost entirely one way:
+
+| Mode | bf16 wrong -> q4_0 right | bf16 right -> q4_0 wrong |
+|---|---|---|
+| Index | 0 | 2 (`commonder`->`commoner`, `dalls`->`dells`) |
+| Open | 0 | 3 (adds `shadowig`->`shadow`) |
+| Sentence | 2 | 9 |
+
+Sentence mode's 9 losses are again mostly the punctuation artifact, not worse
+spelling: `stupid?`, `colorful,`, `comfortable,`, `afraid,` are all correct
+corrections carrying adjacent punctuation, which is why the punctuation-insensitive
+number only moves 88.0% -> 86.0%. Its 2 wins are real (`Thanx` -> `Thanks`, which
+bf16 got wrong, and `Tenpura` -> `Tempura` without a stray quote). Zero wins on
+index and open across 200 examples is the honest signal here: q4_0 is slightly
+worse, by roughly 2-3 points, and n=100 puts that comfortably inside binomial noise
+in magnitude even though the direction is consistent.
+
+**Memory**, measured live rather than estimated:
+
+| | Peak RSS | Of which mmapped weights | Of which anonymous |
+|---|---|---|---|
+| bf16 / transformers | 6.12 GB | 4.77 GB | 0.87 GB |
+| q4_0 / llama-server (4096 ctx) | 4.81 GB | 3.27 GB | 1.54 GB |
+
+The bf16 figure is far below the ~10.2GB the checkpoint occupies on disk because
+`low_cpu_mem_usage=True` mmaps it and gemma-4-E2B-it's vision/audio towers are never
+touched by a text-only prompt. q4_0 saves 1.5GB of weights but spends some of it
+back on KV cache and compute buffers sized for a 4096-token context; a smaller `-c`
+would recover most of that.
+
+**One harness bug worth recording**, since it looked exactly like a model failure:
+`llama-server` was first spawned with `stdout=subprocess.PIPE` and nothing draining
+it, so the server blocked the moment the 64KB pipe buffer filled -- presenting as a
+119-second call returning an empty string. Server output now goes to a log file.
+Separately, gemma-4 defaults to thinking mode under llama.cpp, spending the entire
+budget on a chain of thought and returning empty `content`; the server is now started
+with `--reasoning off` (the equivalent of the transformers path's
+`enable_thinking=False`), and a response carrying only `reasoning_content` raises
+rather than being scored as if the reasoning were the answer.
+
+### Not portable to this backend
+
+Beam mode stays on the transformers backend and is rejected with an explicit error
+on `--backend llama-cpp`: it needs per-token logprobs and beam search, which
+`llama-server` does not expose. Prompt-lookup decoding is likewise transformers-only
+here -- llama.cpp's speculative decoding wants a draft model.
+
+### Side effect: the Hunspell pre-pass
+
+Independent of the model, every invocation re-queried Hunspell for all 68,429 BEA
+errors before the first model call -- about 13.5 minutes, deterministic, identical
+every run, to score 100 examples. That per-typo memo is now persisted between runs
+(`data/bea60k/hunspell_suggestions.json`, untracked), keyed on the dictionary's
+.dic/.aff hashes so an updated dictionary misses the cache instead of silently
+scoring the locked benchmark against different suggestions. Warm: **822s -> 0.3s**,
+which is what makes a full 100-example q4_0 run finish in about four minutes wall
+clock instead of twenty.
+
 ## Reproducing
 
 ```bash
@@ -220,6 +488,23 @@ python scripts/llm_judge_bea60k_cpu.py \
     --model-id google/gemma-4-E2B-it --model-name gemma-4-e2b-beam \
     --bea-dir data/bea60k --output reports/llm_judge_cpu/gemma-4-e2b-beam \
     --answer-mode beam --beam-width 3 --edit-distance-weight 1.0 --skip-timed
+
+# Whole-sentence-rewrite ablation (same 100-sample subset, Hunspell top-8 shown,
+# greedy decoding, no beam search):
+python scripts/llm_judge_bea60k_cpu.py \
+    --model-id google/gemma-4-E2B-it --model-name gemma-4-e2b-sentence \
+    --bea-dir data/bea60k --output reports/llm_judge_cpu/gemma-4-e2b-sentence \
+    --answer-mode sentence --skip-timed
+
+# q4_0 GGUF via llama.cpp (the default backend for new runs; re-score, do not
+# assume the bf16 accuracy carries over):
+python scripts/llm_judge_bea60k_cpu.py \
+    --backend llama-cpp \
+    --gguf ~/.cache/huggingface/hub/models--google--gemma-4-E2B-it-qat-q4_0-gguf/snapshots/*/gemma-4-E2B_q4_0-it.gguf \
+    --llama-server-binary /path/to/llama.cpp/build/bin/llama-server --llama-threads 4 \
+    --model-id google/gemma-4-E2B-it-qat-q4_0-gguf --model-name gemma-4-e2b-q4-sentence \
+    --bea-dir data/bea60k --output reports/llm_judge_cpu/gemma-4-e2b-q4-sentence \
+    --answer-mode sentence --skip-timed
 ```
 
 This track was built and validated directly on the local CPU box since

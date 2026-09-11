@@ -120,6 +120,54 @@ class _CpuDevice:
         return "cpu"
 
 
+def normalize_base_url(base_url: str) -> str:
+    """Server root, given either the root or its OpenAI-compatible `/v1` prefix.
+
+    This backend builds `{base}/v1/chat/completions` and `{base}/tokenize`, so
+    it needs the root -- but `/v1` is the URL every OpenAI client is handed, so
+    that is what a caller naturally has lying around. Accept both rather than
+    fail with a 404 that looks like a dead server.
+    """
+    trimmed = base_url.strip().rstrip("/")
+    if trimmed.endswith("/v1"):
+        trimmed = trimmed[: -len("/v1")]
+    return trimmed
+
+
+def attach_llama_cpp(
+    base_url: str,
+    *,
+    model_id: str,
+    startup_timeout_s: float = 300.0,
+) -> LlamaCppModel:
+    """Talk to a llama-server somebody else started, instead of spawning one.
+
+    The GPU track starts one server for the whole pod (model load is the
+    expensive part, and `--parallel` slots are shared), then runs several
+    scorers and a prompt search against it. `process` stays None, so `stop()`
+    is a no-op and this harness never kills a server it does not own.
+    """
+    base_url = normalize_base_url(base_url)
+    props = wait_for_server(base_url, timeout_s=startup_timeout_s)
+    settings = props.get("default_generation_settings", {}) if isinstance(props, dict) else {}
+    return LlamaCppModel(
+        model_id=model_id,
+        base_url=base_url,
+        server_metadata={
+            "attached": True,
+            "base_url": base_url,
+            "model_path": props.get("model_path") if isinstance(props, dict) else None,
+            "n_ctx": settings.get("n_ctx"),
+            "total_slots": props.get("total_slots") if isinstance(props, dict) else None,
+            "chat_template_from_gguf": bool(props.get("chat_template")) if isinstance(props, dict) else False,
+            # Not enforceable from here: the flag belongs to the server process.
+            # generate() still raises if a response arrives with only
+            # reasoning_content, which is what `--reasoning off` prevents.
+            "reasoning": "assumed off (server started elsewhere)",
+        },
+    )
+
+
 def wait_for_server(base_url: str, *, timeout_s: float = 300.0, process: subprocess.Popen | None = None) -> dict:
     """Block until /health reports ready, surfacing an early server exit."""
     deadline = time.time() + timeout_s

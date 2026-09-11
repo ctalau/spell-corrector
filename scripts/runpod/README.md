@@ -35,6 +35,37 @@ Bootstrap sources that file. Do not pass a cu128 image or cu128 wheels:
 Community hosts with a CUDA 12.4 driver fall back to CPU. See
 [reports/EXPERIMENT_LLM_JUDGE.md](../../reports/EXPERIMENT_LLM_JUDGE.md).
 
+## GPU llama.cpp track (q4_0 gemma-4-E2B, `launch_gpu_llama.py`)
+
+A serving benchmark rather than a training run: build llama.cpp with CUDA,
+serve Google's QAT q4_0 GGUF with **full GPU offload**, and measure prefill /
+decode throughput, a concurrency sweep and a $/1,000-corrections table.
+
+```bash
+python scripts/runpod/launch_gpu_llama.py --branch <this-branch>
+# monitor, fetch, then ALWAYS:
+python scripts/runpod/fetch_artifacts.py <pod-id> --dest .
+python scripts/runpod/terminate.py --all
+```
+
+Two things about it differ from the other launchers:
+
+* **The image is a CUDA `-devel` one** (`runpod/pytorch:2.4.0-py3.11-cuda12.4.1-devel-ubuntu22.04`).
+  `-DGGML_CUDA=ON` needs `nvcc`, which the runtime images do not ship.
+* **GPU choice is a cheapest-first walk, not a preference list handed to the
+  API.** The q4_0 weights are 3.35GB so every card from an 8GB RTX 3070 up
+  fits; the only variable is price, and on the community cloud nearly every
+  cheap type sits at "Low" stock. `launch_gpu_llama.py` therefore creates the
+  pod one GPU type at a time in price order and records every attempt — the
+  failures included — so the write-up can say which GPU was *obtainable*, not
+  which was theoretically cheapest. Tesla V100 stays last despite its price
+  (sm_70, no bf16).
+
+The pod serves `RUNINFO.json` (chosen GPU, price, attempt log, llama.cpp
+commit, server command, startup seconds) alongside the usual `run.log` /
+`STATUS` / `DONE`, and `llama_server.log` directly so a partial GPU offload is
+visible without fetching anything.
+
 ## Where the setup time went
 
 The first experiment spent roughly 25 minutes before a single optimizer step.

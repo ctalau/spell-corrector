@@ -162,6 +162,12 @@ pip_install /tmp/pip-upgrade.log --upgrade pip || die "pip upgrade"
 pip_install /tmp/pip-deps.log \
   numpy matplotlib requests pytest \
   || die "pip deps"
+
+# DSPy drives scripts/dspy_prompt_search.py, which talks to llama-server over
+# its OpenAI-compatible endpoint (via LiteLLM) and needs nothing from torch or
+# transformers. `dspy` is the current distribution name; `dspy-ai` is a legacy
+# alias and installing that one instead gets an outdated package.
+pip_install /tmp/pip-dspy.log "dspy>=3.0" || die "pip dspy"
 pip_install /tmp/pip-build.log "setuptools<60" wheel cython || die "pip build deps"
 pip_install /tmp/hunspell-pip.log --no-build-isolation --force-reinstall hunspell==0.5.5 \
   || die "hunspell pip install into ${PYTHON}"

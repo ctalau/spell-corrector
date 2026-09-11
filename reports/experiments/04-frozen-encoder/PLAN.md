@@ -4,7 +4,7 @@ Date: 2026-09-09. Status: implementation and execution plan; no new training per
 
 Pinned Hugging Face revision for this implementation (resolved 2026-09-09):
 `answerdotai/ModernBERT-base` @ `8949b909ec900327062f0ebf497f51aef5e6f0c8`.
-Launch: see [FROZEN_ENCODER.md](FROZEN_ENCODER.md).
+Launch: see [README.md](README.md).
 
 ## 1. Diagnosis before implementation
 
@@ -25,7 +25,7 @@ Mean serialized length was 202.95 byte/special-token positions. One pass over st
 
 The often-cited Chinchilla heuristic is around 20 training tokens per parameter for compute-optimal autoregressive pretraining: about 1.75B tokens for 87M parameters. It is a rough reference, not a data requirement for this byte-level supervised reranker or proof that a particular dataset size reaches 75%. Tokenization, objective, data repetition and compute allocation differ. Modern pretrained models can be trained far beyond compute-optimal ratios to improve downstream economics. We should reuse that pretraining, not recreate it.
 
-Sources: [run summary](../artifacts/train_summary.json), [data statistics](exp2_data_stats.json), [loss graph](training_loss.png), [Chinchilla paper](https://arxiv.org/abs/2203.15556). A development approach consistent with [Karpathy's published recipe](https://karpathy.github.io/2019/04/25/recipe/) is to inspect actual inputs, establish simple baselines, overfit a tiny batch to validate implementation, use pretrained models and change one factor at a time. This is an application of his published advice, not a claim about what he would personally diagnose here.
+Sources: [run summary](../../../artifacts/train_summary.json), [data statistics](../02-byte-reranker-87m/data_stats.json), [loss graph](../../training_loss.png), [Chinchilla paper](https://arxiv.org/abs/2203.15556). A development approach consistent with [Karpathy's published recipe](https://karpathy.github.io/2019/04/25/recipe/) is to inspect actual inputs, establish simple baselines, overfit a tiny batch to validate implementation, use pretrained models and change one factor at a time. This is an application of his published advice, not a claim about what he would personally diagnose here.
 
 ## 2. Model and exact trainable boundary
 

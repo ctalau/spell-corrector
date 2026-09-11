@@ -1,4 +1,18 @@
-# Experiment report — exp2 (87M) Hunspell reranker vs Aspell on BEA-60K
+# Experiment 2 — 87M byte-level Hunspell reranker
+
+| | |
+|---|---|
+| **Status** | **completed** — trained, benchmarked, target missed |
+| **When** | 2026-09-09, pod `xwvjd2w980kk00`, commit `b9b66cf275a062390e4428674eb27396461b1dcb` |
+| **Headline result** | **64.82% overall** top-1 on BEA-60K (n=68,429 word errors), 80.14% conditional. Target was 75%. Aspell 60.56%, Hunspell top-1 53.67%. |
+| **Cost** | ~$2.95 to DONE (3.74 pod-hours × $0.79/h, Community L40S). ~$2 more was burned across the eight preceding failed pods — see [RUN_NOTES.md](RUN_NOTES.md). |
+| **What it settled** | Scaling 28M → 87M and 235k → 2.08M examples buys ~+2.3 pp overall (62.56% → 64.82%) and lifts conditional accuracy 77.84% → 80.14%. The training-data fix worked: the post-filter ED1/ED2/ED3+ mixture (81.7/16.9/1.4) closely matches BEA's in-pool errors (83.0/15.7/1.3). |
+| **What it left open** | Conditional accuracy is still ~12.3 pp below synthetic validation (92.42%), i.e. the gap is generalization, not fit. Pool coverage (80.89% at 16 slots) caps overall accuracy; 75% would need 92.72% conditional. `gold0_fraction` never bound (76.6% of training rows have gold at slot 0 vs BEA's 66.8%). See §"Known issues" in [RUN_NOTES.md](RUN_NOTES.md). |
+| **Plan** | [PLAN.md](PLAN.md) (rationale, changes 1-9, run configuration) |
+| **Operational notes** | [RUN_NOTES.md](RUN_NOTES.md) (bug list, Runpod procedure, phase timings, budget) |
+| **Artifacts** | [`reports/bea60k/`](../../bea60k/), [SUMMARY.txt](SUMMARY.txt), [data_stats.json](data_stats.json), [manifest.json](manifest.json), [STATUS.txt](STATUS.txt), [`reports/training_loss.png`](../../training_loss.png), [`reports/run3_partial/`](../../run3_partial/) (the OOMed predecessor run) |
+
+---
 
 **DID WE HIT 75%? NO** — overall **64.82%** (target 75%).
 

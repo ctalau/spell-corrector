@@ -16,4 +16,4 @@ set is 81.7 / 16.9 / 1.4 percent ED1 / ED2 / ED3+, against 83.0 / 15.7 / 1.3 for
 the BEA-60K errors where gold is in the pool. That near-match is the evidence
 that experiment 1's core defect (an ED1-only training set) is addressed.
 
-See HANDOFF.md section 5.
+See [reports/experiments/02-byte-reranker-87m/RUN_NOTES.md](../experiments/02-byte-reranker-87m/RUN_NOTES.md) sections 4-6 for the full post-mortem.

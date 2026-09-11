@@ -50,7 +50,7 @@ from spelling_reranker.bea60k import extract_word_errors, load_bea_pairs
 from spelling_reranker.byte_encoding import nfc
 from spelling_reranker.candidates import build_pool
 from spelling_reranker.hunspell import default_engine
-from spelling_reranker.llama_cpp_backend import load_llama_cpp
+from spelling_reranker.llama_cpp_backend import attach_llama_cpp, load_llama_cpp
 from spelling_reranker.llm_judge_cpu import (
     beam_word_candidates,
     build_generative_messages,
@@ -321,6 +321,31 @@ def run_phase(
     }
 
 
+def load_llama_backend(args):
+    """Attach to a llama-server that is already running, or spawn a private one.
+
+    Spawning stays the default so every existing invocation behaves exactly as
+    before. Attaching exists for the GPU track, where model load dominates and
+    one server's `--parallel` slots are shared by several scorers: killing it
+    when one scorer finishes would throw away the expensive part. The attached
+    model carries no process, so its `stop()` is a no-op.
+    """
+    if args.llama_base_url:
+        return attach_llama_cpp(args.llama_base_url, model_id=args.model_id)
+    if not args.gguf or not args.llama_server_binary:
+        raise SystemExit(
+            "--backend llama-cpp requires --gguf and --llama-server-binary "
+            "(or --llama-base-url to attach to a running server)"
+        )
+    return load_llama_cpp(
+        args.gguf,
+        server_binary=args.llama_server_binary,
+        port=args.llama_server_port,
+        n_threads=args.llama_threads,
+        log_path=args.output / "llama_server.log",
+    )
+
+
 def _count_tokens(loaded, text: str) -> int:
     """Token count from whichever backend is loaded (both tokenize natively)."""
     if hasattr(loaded, "n_tokens"):  # llama.cpp backend, via the server's /tokenize
@@ -362,6 +387,16 @@ def main() -> int:
         help="path to llama.cpp's llama-server binary (required for --backend llama-cpp)",
     )
     parser.add_argument("--llama-server-port", type=int, default=8080)
+    parser.add_argument(
+        "--llama-base-url",
+        default=None,
+        help="attach to a llama-server that is ALREADY running at this URL instead of "
+        "spawning one (--gguf/--llama-server-binary then unnecessary, and the server is "
+        "left running on exit). Either the root (http://127.0.0.1:8080) or its "
+        "OpenAI-compatible /v1 prefix is accepted. Used by the GPU track, where one "
+        "server with GPU-resident weights is shared by several scorers; the default "
+        "(spawn a private server) is unchanged.",
+    )
     parser.add_argument(
         "--llama-threads", type=int, default=None, help="llama-server -t; default lets llama.cpp choose"
     )
@@ -421,6 +456,10 @@ def main() -> int:
     parser.add_argument("--skip-timed", action="store_true", help="only run the fixed n-samples phase")
     args = parser.parse_args()
 
+    # Answer-mode portability across backends: 'index', 'open' and 'sentence'
+    # only need chat completions, so they run identically on llama-server
+    # (spawned or attached). 'beam' does not: it needs per-token logprobs and
+    # transformers' beam search, which llama-server does not expose.
     if args.backend == "llama-cpp" and args.answer_mode == "beam":
         raise SystemExit(
             "--answer-mode beam needs per-token logprobs and beam search from transformers; "
@@ -486,15 +525,7 @@ def main() -> int:
     t_load0 = time.perf_counter()
     try:
         if args.backend == "llama-cpp":
-            if not args.gguf or not args.llama_server_binary:
-                raise SystemExit("--backend llama-cpp requires --gguf and --llama-server-binary")
-            loaded = load_llama_cpp(
-                args.gguf,
-                server_binary=args.llama_server_binary,
-                port=args.llama_server_port,
-                n_threads=args.llama_threads,
-                log_path=args.output / "llama_server.log",
-            )
+            loaded = load_llama_backend(args)
         else:
             loaded = load_llm(args.model_id, dtype=args.dtype)
     except Exception as exc:  # noqa: BLE001
@@ -514,7 +545,8 @@ def main() -> int:
     meta["supports_enable_thinking"] = loaded.supports_enable_thinking
     if args.backend == "llama-cpp":
         meta["llama_server"] = loaded.server_metadata
-        meta["gguf_path"] = str(args.gguf)
+        meta["gguf_path"] = str(args.gguf) if args.gguf else None
+        meta["llama_base_url"] = args.llama_base_url
     else:
         import torch
         import transformers

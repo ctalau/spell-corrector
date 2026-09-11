@@ -1,6 +1,25 @@
-# LLM-judge experiment: prompting small instruct LLMs to rerank Hunspell suggestions
+# Experiment 5 — LLM judge, index mode (prompt a small instruct LLM to pick a Hunspell candidate)
 
-A separate track from the trained ~28M byte-level reranker (`reports/EXPERIMENT.md`):
+| | |
+|---|---|
+| **Status** | **completed on CPU** — the GPU pod run this harness was written for has never produced numbers. Two pods failed at model load; see "Full Gemma on Runpod" below. |
+| **When** | Date not recorded. Two failed GPU pods: `rwfef0kegboxvk` (transformers 5.14.1 on image torch 2.4.1 — hard-imported `DTensor`, died at model load *after* BEA prep, `bea_n_eligible=67844`) and `9cfvu6gcwn11ks` (torch 2.6.0+cu124 — `libcudnn.so.9: cannot open shared object file`). |
+| **Headline result** | `google/gemma-4-E2B-it`, zero-shot, picking from Hunspell's top-8: **83.0% overall** on a fixed **n=100** sample (100% conditional), **78.8%** on an n=486 five-minute timed run. Hunspell top-1 on the same samples: 59.0% / 56.0%. p50 latency 632ms / 605ms on 4 vCPUs. |
+| **Cost** | Not recorded. GPU pods were budgeted for a Community RTX A4000 at ~$0.17/hr; the cheapest planned run is one hour. The numbers here cost nothing but local CPU time. |
+| **What it settled** | A prompted general-purpose small LLM beats both Hunspell top-1 and — on these small samples — the trained reranker's *conditional* accuracy, with no training at all. It also settled the runtime: on CUDA 12.4 hosts you need the py3.11/cu124 image plus `torch==2.5.1+cu124` with `nvidia-*` wheels force-installed into the venv and on `LD_LIBRARY_PATH`; cu128 wheels silently fall back to CPU. |
+| **What it left open** | Sample size. n=100-529 against the trained reranker's n=68,429 is a promising signal, not a settled comparison (a 95% CI on a 100-sample proportion near 40-80% is roughly ±8-10 pp). No GPU latency number exists for any of the three models. |
+| **Artifacts** | [`reports/llm_judge/`](../../llm_judge/) — `results.json`, `predictions_sample100.jsonl`, `predictions_timed.jsonl` and latency histograms per model, plus `summary.json`. **Note:** these files are byte-identical to their counterparts in [`reports/llm_judge_cpu/`](../../llm_judge_cpu/) for the three shared models — the same CPU runs, copied. |
+| **Successor** | [Experiment 6](../06-llm-judge-cpu-llamacpp/README.md) takes this harness further: three more answer modes, q4_0 quantization and llama.cpp. |
+
+> **Two wording caveats in the text below, preserved rather than edited.** It calls
+> the trained baseline "the trained ~28M byte-level reranker", but the numbers it
+> compares against (80.1% conditional) are [experiment 2's 87M model](../02-byte-reranker-87m/README.md).
+> And the "Environment — CPU, not GPU" section is the real provenance of every
+> accuracy and latency figure in this document.
+
+---
+
+A separate track from the trained ~28M byte-level reranker (`reports/experiments/02-byte-reranker-87m/README.md`):
 instead of a purpose-trained model, a general-purpose small instruction-tuned LLM is
 prompted zero-shot with Hunspell's numbered suggestion list and asked to pick the
 best one. Code: `spelling_reranker/llm_judge.py`, `scripts/llm_judge_bea60k.py`.

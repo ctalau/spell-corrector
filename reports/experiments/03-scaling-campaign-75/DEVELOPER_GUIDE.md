@@ -1,6 +1,6 @@
 # Developer guide to the 75% spelling experiment
 
-This guide is for a developer who knows basic probability, statistics and introductory machine learning. Read it alongside [the execution plan](EXPERIMENT3_75_PLAN.md). The plan specifies the experiments and commands; this document explains what they mean and how to judge the results.
+This guide is for a developer who knows basic probability, statistics and introductory machine learning. Read it alongside [the execution plan](PLAN.md). The plan specifies the experiments and commands; this document explains what they mean and how to judge the results.
 
 **Current situation:** the latest model corrects 64.82% of benchmark word errors. We want 75%. Hunspell already proposes the correct answer in roughly 80% of cases, so the main job is to make the model choose much better among those suggestions.
 
@@ -160,7 +160,7 @@ This is why the plan uses short screens, full confirmation, and a final frozen t
 
 ## 9. How to execute without wasting the budget
 
-Use the [pod and cost section](EXPERIMENT3_75_PLAN.md#5a-pod-specification-and-cost-estimate) as the source of truth for current estimates. Start with the first-stage budget, not every possible experiment at once.
+Use the [pod and cost section](PLAN.md#5a-pod-specification-and-cost-estimate) as the source of truth for current estimates. Start with the first-stage budget, not every possible experiment at once.
 
 Prepare code, configs and data decisions before renting the GPU. Each run needs a unique output directory, code commit, dataset hashes, configuration, seed and prediction report. Copy those artifacts out before terminating the temporary pod.
 

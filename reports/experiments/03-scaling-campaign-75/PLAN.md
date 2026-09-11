@@ -1,6 +1,6 @@
 # Experiment 3: reach 75% overall correction accuracy
 
-> Update 2026-09-09: the next run is the [frozen ModernBERT + selector pilot on a 24 GB pod](FROZEN_ENCODER_PLAN.md). It supersedes this plan's E1–E6 execution queue and L40S budget for the immediate experiment. The evaluation safeguards below remain applicable.
+> Update 2026-09-09: the next run is the [frozen ModernBERT + selector pilot on a 24 GB pod](../04-frozen-encoder/PLAN.md). It supersedes this plan's E1–E6 execution queue and L40S budget for the immediate experiment. The evaluation safeguards below remain applicable.
 
 Status: execution plan; no new training or accuracy result is claimed here.
 Based on repository commit `1047c53bb3c1ae27c48d96c17b22ab3516b969e8`.
@@ -9,7 +9,7 @@ Based on repository commit `1047c53bb3c1ae27c48d96c17b22ab3516b969e8`.
 
 Primary target: **at least 75.00% overall top-1 accuracy on the existing BEA-60K word-error task, using only Hunspell's first 10 suggestions**. Also report the existing 16-slot system as a secondary comparison. Preserve byte inputs, candidate order, NFC exact matching, and one model forward pass for all candidates. No Aspell candidates, gold insertion, candidate reordering, global lowercasing, or generative fallback.
 
-The latest completed experiment is exp2, not the unfinished run described in HANDOFF.md. Sources: [results.json](bea60k/results.json), [SUMMARY.txt](SUMMARY.txt), [experiment report](EXPERIMENT.md).
+The latest completed experiment is exp2, not the unfinished run described in the handoff notes (now [02-byte-reranker-87m/RUN_NOTES.md](../02-byte-reranker-87m/RUN_NOTES.md)). Sources: [results.json](../../bea60k/results.json), [SUMMARY.txt](../02-byte-reranker-87m/SUMMARY.txt), [experiment report](../02-byte-reranker-87m/README.md).
 
 | Quantity | Exp2 |
 |---|---:|
@@ -34,7 +34,7 @@ At the old denominator, success requires at least **51,322 correct predictions**
 
 Thus blindly favouring candidate zero cannot solve the problem. Both retention and rescue matter. Illustratively, at the current 16-slot group proportions, 97% retention would still require about 84.3% rescue to hit 75%.
 
-**Correction to the final Takeaway in EXPERIMENT.md:** an 80.89% ceiling does not put 75% out of reach. The 10.18-point target gap can be closed inside the existing pool. The 19.11% outside-pool errors prevent perfection, not 75%. Going from 10 to 16 suggestions adds only about 0.55 points of coverage; it cannot explain away the gap.
+**Correction to the final Takeaway in [experiment 2's report](../02-byte-reranker-87m/README.md):** an 80.89% ceiling does not put 75% out of reach. The 10.18-point target gap can be closed inside the existing pool. The 19.11% outside-pool errors prevent perfection, not 75%. Going from 10 to 16 suggestions adds only about 0.55 points of coverage; it cannot explain away the gap.
 
 The 92.42% synthetic validation score is not evidence that deployment conditional accuracy is already near target: exp2 is roughly 12.3 points worse on the benchmark's solvable population. Prioritize generalization and measurement before another model-size increase.
 
@@ -102,7 +102,7 @@ Do not run a combinatorial grid. Carry only the best passing arm forward. If not
 
 This is a plan commit, not an implementation of E1–E6. The following baseline commands use existing interfaces. The strict-top10 switch, new splits, richer evaluator and pretraining task described above must be implemented before the primary sweep.
 
-Use the installation instructions in [README](../README.md), including the Python-version-specific Hunspell setup. Run from the repository root on your GPU machine. Fetch LFS artifacts if available; pointer files are not model weights or parquet data.
+Use the installation instructions in the [repository README](../../../README.md), including the Python-version-specific Hunspell setup. Run from the repository root on your GPU machine. Fetch LFS artifacts if available; pointer files are not model weights or parquet data.
 
 ```bash
 git pull --ff-only
@@ -255,7 +255,7 @@ Taxes, paid dataset licenses/annotation, developer time, external backup storage
 
 These are manual spending gates, not an implemented automatic billing stop. Record actual pod rate and creation/termination timestamps in the run ledger. Do not leave the GPU running between workdays. Download and verify artifacts before stopping or terminating: the selected container disk is temporary.
 
-For terminology and the reasoning behind each experiment, see [the developer explainer](EXPERIMENT3_DEVELOPER_GUIDE.md).
+For terminology and the reasoning behind each experiment, see [the developer explainer](DEVELOPER_GUIDE.md).
 
 ## 6. Freeze, benchmark once, and decide
 

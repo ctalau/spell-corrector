@@ -1,6 +1,26 @@
-# Frozen ModernBERT selector — how to run
+# Experiment 4 — frozen ModernBERT encoder + small selector head
 
-Implementation of [FROZEN_ENCODER_PLAN.md](FROZEN_ENCODER_PLAN.md). The encoder
+| | |
+|---|---|
+| **Status** | **aborted mid-run** — H0 and H1 completed, H2 died on NaN, H3 never started. No BEA-60K number. |
+| **When** | 2026-09-09. Pod `ww31jci1imkyo9`, commit `5a3b7ca`. Encoder pinned at `answerdotai/ModernBERT-base` @ `8949b909ec900327062f0ebf497f51aef5e6f0c8`. |
+| **Headline result** | On the **synthetic D-pair** split only (not BEA): H0 (Hunspell first candidate) overall 81.56%, conditional 82.04%; H1 (rank + 4 spelling features, no encoder) best val conditional 80.51%. H2 (linear on frozen encoder features) set `nan_seen=true` after ~1 step. **No arm has been measured on BEA-60K**, and the BEA-1k monitoring gate never fired because head-only training finishes in minutes. |
+| **Cost** | Not recorded for the actual pod. Budgeted: **$5 with a 12-pod-hour stop**, on an RTX A5000 (24 GB) at a published $0.27/h plus ~$0.014/h storage — an estimated $1.42-$3.55 for the pilot. |
+| **What it settled** | Nothing about the frozen-encoder hypothesis. What it did establish is operational: unnormalized 3854-d encoder features (including `c*t` and `|c-t|`) overflow at lr `1e-3`, and a bash status-capture bug turned a recoverable NaN into a fatal experiment abort (post-mortem below). |
+| **What it left open** | The actual question — do fixed pretrained contextual representations support candidate selection — is unanswered. The admission gate (H3 or H2 beats H1 by ≥1 pp on D-pair with a positive paired document-bootstrap difference) was never evaluated. |
+| **Plan** | [PLAN.md](PLAN.md) — diagnosis, exact trainable boundary, feature/selector spec, pod and caching budget, acceptance tests. |
+| **Artifacts** | Head weights, plots and metrics go to `artifacts/frozen/` and caches to `artifacts/frozen_cache/` (both gitignored, not committed). Nothing from this experiment is under `reports/`. |
+
+> **Caution when reading the D-pair numbers.** They are synthetic held-out
+> pairs, not BEA-60K, and they are not comparable with any overall/conditional
+> number in the index table. H1 scoring *below* H0 is a pilot observation on a
+> partial run, not a finding.
+
+---
+
+## How to run it
+
+Implementation of [PLAN.md](PLAN.md). The encoder
 is **answerdotai/ModernBERT-base**, frozen, with a trainable selector head. No
 LoRA and no backbone finetuning.
 

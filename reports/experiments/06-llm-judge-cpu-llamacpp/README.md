@@ -1,6 +1,27 @@
-# LLM-judge experiment: prompting small instruct LLMs to rerank Hunspell suggestions
+# Experiment 6 — LLM judge on CPU: four answer modes, then q4_0 + llama.cpp
 
-A separate track from the trained ~28M byte-level reranker (`reports/EXPERIMENT.md`):
+| | |
+|---|---|
+| **Status** | **completed** (local CPU box only; no pod was used and no bootstrap script exists for this track) |
+| **When** | Date not recorded. Local box: 4 vCPU Intel Xeon @2.10GHz, 15GB RAM, no GPU. |
+| **Headline result** | Best measured system in the repository: `google/gemma-4-E2B-it` bf16, **open mode**, **90.0% overall** on a fixed **n=100** BEA-60K sample. Beam mode 88.0%, sentence mode 88.0% punctuation-insensitive (73.0% strict), index mode 83.0%. On the q4_0 GGUF via llama.cpp: open 87.0%, index 81.0%, sentence 86.0% punctuation-insensitive at a p50 of 2,118ms. |
+| **Cost** | $0 in GPU rental. Costs are wall clock: a warm-cache 100-example q4_0 run is ~4 minutes; the bf16 sentence-mode run took 693s for 100 examples. |
+| **What it settled** | (1) The forced-choice format is the binding constraint, not the model — 17 of the 100 sampled errors have no gold candidate anywhere in Hunspell's list, and letting the model answer freely recovers 58.8% (open) to 64.7% (beam) of them. (2) **q4_0 is 2-3 points worse than bf16, consistently in one direction** — zero wins across 200 index/open examples — in exchange for a trustworthy 2.8x speedup in sentence mode. (3) Sentence mode's strict score is dominated by a single artifact: 73 of 100 rewrites reflow BEA's pre-tokenised punctuation, and 15 of its 27 strict errors are punctuation attachment on otherwise-correct corrections. (4) The Hunspell pre-pass memo turns an 822s per-invocation cost into 0.3s. |
+| **What it left open** | Everything is n=100 on one fixed sample; ±8-10 pp binomial noise. The two recommended prompt fixes (an explicit `<corrected_word>` field, or marking the correction inside the rewrite) are specified and unrun. The prompt-lookup speedup is validated on a 12-example micro-benchmark only — the full 100-example rerun was interrupted. Beam mode and prompt-lookup are not portable to the llama.cpp backend. |
+| **Artifacts** | [`reports/llm_judge_cpu/`](../../llm_judge_cpu/) — one directory per model/mode (`gemma-4-e2b`, `-open`, `-beam`, `-sentence`, `-q4-index`, `-q4-open`, `-q4-sentence`, `qwen3.5-0.8b`, `minicpm5-1b`), each with `results.json`, `predictions_sample100.jsonl` and latency histograms. |
+| **Predecessor** | [Experiment 5](../05-llm-judge-index/README.md) — the index-mode-only harness these three models were first measured with. The three shared models' `results.json` files are identical between the two directories. |
+
+> The bug post-mortems in this document (the beam-mode edit-distance scoring flaw,
+> the `llama-server` blocked-pipe stall, gemma-4's default thinking mode returning
+> empty `content`) are kept in full below. So is the finding that **MiniCPM5-1B
+> scores below Hunspell top-1 alone** — i.e. reranking with it is worse than not
+> reranking. One wording caveat: the text calls the trained baseline "the trained
+> ~28M byte-level reranker", but the numbers it compares against are
+> [experiment 2's 87M model](../02-byte-reranker-87m/README.md).
+
+---
+
+A separate track from the trained ~28M byte-level reranker (`reports/experiments/02-byte-reranker-87m/README.md`):
 instead of a purpose-trained model, a general-purpose small instruction-tuned LLM is
 prompted zero-shot with Hunspell's numbered suggestion list and asked to pick the
 best one. Code: `spelling_reranker/llm_judge_cpu.py`, `scripts/llm_judge_bea60k_cpu.py`.

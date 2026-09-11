@@ -3,7 +3,8 @@
 Byte-level **contextual spelling reranker**. Hunspell proposes candidates; a
 bidirectional Transformer picks exactly one.
 
-This repository is the experiment line from [PLAN.md](PLAN.md):
+This repository is the experiment line from the original charter, now at
+[reports/experiments/01-byte-reranker-28m/PLAN.md](reports/experiments/01-byte-reranker-28m/PLAN.md):
 
 > Beat Aspell's top-1 spelling correction accuracy on BEA-60K.
 
@@ -11,9 +12,26 @@ The model is **not** generative. Training labels are Hunspell ranks on synthetic
 typos over WikiText-103. BEA-60K is a locked final benchmark and is never used
 for training, validation, or hyperparameter selection.
 
+## Start here: the experiment log
+
+**[reports/README.md](reports/README.md)** is the index of everything that has
+been tried — seven experiments, every measured number against BEA-60K in one
+table with its sample size, what has been ruled out, and what is queued. Read it
+before proposing anything.
+
+The short version, as of 2026-09-11:
+
+| | |
+|---|---|
+| Best system measured on the **full** benchmark | the trained 87M byte-level reranker — **64.82%** overall, n=68,429 (Aspell 60.56%, Hunspell top-1 53.67%) |
+| Best system measured **at all** | `google/gemma-4-E2B-it` prompted zero-shot in open mode — **90.0%** overall, but **n=100** on a CPU box, so ±8-10 pp |
+| In flight | gemma-4-E2B q4_0 on GPU via llama.cpp + DSPy prompt optimization |
+
 ## Where the accuracy comes from
 
-Experiment 1 reached **62.56%** overall (vs Aspell 60.55%). Decomposed:
+Experiment 1 reached **62.56%** overall (vs Aspell 60.55%); experiment 2 scaled
+it to **64.82%** (conditional 80.14%), short of its 75% target. Decomposed, for
+experiment 1:
 
 ```
 overall = P(gold in Hunspell pool) x P(model picks gold | it is there)
@@ -21,7 +39,7 @@ overall = P(gold in Hunspell pool) x P(model picks gold | it is there)
 ```
 
 Hunspell is fixed as the only candidate source, so the first factor is a hard
-ceiling around 81%. Everything in experiment 2 targets the second factor:
+ceiling around 81%. Everything in experiment 2 targeted the second factor:
 
 | Change | Why |
 |---|---|
@@ -131,7 +149,8 @@ Checkpoints land in `artifacts/model/`.
 
 ## Frozen ModernBERT selector
 
-Pilot from [reports/FROZEN_ENCODER_PLAN.md](reports/FROZEN_ENCODER_PLAN.md): freeze
+Pilot from [reports/experiments/04-frozen-encoder/PLAN.md](reports/experiments/04-frozen-encoder/PLAN.md)
+(**aborted mid-run** — see its front matter before relying on anything here): freeze
 `answerdotai/ModernBERT-base` (Hugging Face revision
 `8949b909ec900327062f0ebf497f51aef5e6f0c8`, resolved 2026-09-09) and train only
 a small selector. Launch on Runpod with:
@@ -142,7 +161,7 @@ python scripts/runpod/launch.py \
   --config configs/train_frozen_modernbert.yaml
 ```
 
-That defaults to the cu124 / Python 3.11 image (`runpod/pytorch:2.4.0-py3.11-cuda12.4.1-devel-ubuntu22.04`) so Hunspell and `transformers>=4.48,<5` both work. Do not use the cu128 / py3.12 torch 2.8 image until Hunspell is fixed for 3.12. See [reports/FROZEN_ENCODER.md](reports/FROZEN_ENCODER.md).
+That defaults to the cu124 / Python 3.11 image (`runpod/pytorch:2.4.0-py3.11-cuda12.4.1-devel-ubuntu22.04`) so Hunspell and `transformers>=4.48,<5` both work. Do not use the cu128 / py3.12 torch 2.8 image until Hunspell is fixed for 3.12. See [reports/experiments/04-frozen-encoder/README.md](reports/experiments/04-frozen-encoder/README.md).
 
 Local GPU path (after synthetic parquet exists):
 
@@ -157,11 +176,29 @@ python scripts/evaluate_frozen_selector.py --config configs/train_frozen_modernb
 ```
 
 Do not train or tune on BEA-60K. The 1k subset is a monitoring gate only.
-See [reports/FROZEN_ENCODER.md](reports/FROZEN_ENCODER.md).
+See [reports/experiments/04-frozen-encoder/README.md](reports/experiments/04-frozen-encoder/README.md).
+
+## LLM judge (no training)
+
+A separate track prompts a small instruction-tuned LLM to correct the typo
+directly, in one of four answer modes (pick a candidate index, answer freely with
+the candidates as a hint, self-generate candidates by beam search, or rewrite the
+whole sentence). It needs no training and is currently the highest-scoring thing
+in the repo, on a small sample.
+
+```bash
+python scripts/llm_judge_bea60k_cpu.py --help    # CPU / llama.cpp track, four answer modes
+python scripts/llm_judge_bea60k.py --help        # GPU-targeted index-mode harness
+```
+
+Results and the full method:
+[experiment 5](reports/experiments/05-llm-judge-index/README.md) and
+[experiment 6](reports/experiments/06-llm-judge-cpu-llamacpp/README.md).
 
 ## Benchmark BEA-60K
 
-Do **not** commit BEA files.
+BEA-60K is a **locked** benchmark: never train, validate, tune or prompt-search
+on it, and do **not** commit BEA files.
 
 ```bash
 python scripts/download_bea60k.py

@@ -70,8 +70,17 @@ def probe_kernels() -> dict:
     return info
 
 
-def build_batches(lengths: list[int], micro: int, seed: int, bucket: int = 64) -> list[list[int]]:
-    """Length-bucketed batches: sort inside a shuffled window, shuffle batches."""
+def build_batches(
+    lengths: list[int], micro: int, seed: int, token_budget: int = 0, bucket: int = 64
+) -> list[list[int]]:
+    """Length-bucketed batches with a per-batch token budget.
+
+    A fixed row count makes memory a function of the longest sentence in the
+    batch: at micro-batch 16 the short batches sat at 17 GiB and the long ones
+    tipped a 24 GiB card over. Capping `rows * longest_row` instead keeps every
+    batch roughly the same size in memory -- more rows when the sentences are
+    short, fewer when they are long.
+    """
     rng = random.Random(seed)
     order = list(range(len(lengths)))
     rng.shuffle(order)
@@ -79,8 +88,20 @@ def build_batches(lengths: list[int], micro: int, seed: int, bucket: int = 64) -
     batches: list[list[int]] = []
     for start in range(0, len(order), window):
         chunk = sorted(order[start : start + window], key=lambda i: lengths[i])
-        for b in range(0, len(chunk), micro):
-            batches.append(chunk[b : b + micro])
+        current: list[int] = []
+        widest = 0
+        for idx in chunk:
+            widest_next = max(widest, lengths[idx])
+            fits_rows = len(current) + 1 <= micro
+            fits_tokens = (not token_budget) or (len(current) + 1) * widest_next <= token_budget
+            if current and (not fits_rows or not fits_tokens):
+                batches.append(current)
+                current, widest = [], 0
+                widest_next = lengths[idx]
+            current.append(idx)
+            widest = widest_next
+        if current:
+            batches.append(current)
     rng.shuffle(batches)
     return batches
 
@@ -205,10 +226,12 @@ def resolve_answer_head(model, torch):
     return forward_hidden, lm_head, "answer-position LM head"
 
 
-def evaluate(model, tok_left, rows, torch, batch_size=48, max_new_tokens=6, limit=0):
+def evaluate(model, tok_left, rows, torch, batch_size=24, max_new_tokens=6, limit=0):
     """Greedy batched generation; returns (exact, casefold, predictions)."""
     rows = rows[:limit] if limit else rows
     model.eval()
+    gc.collect()
+    torch.cuda.empty_cache()
     prev_cache = getattr(model.config, "use_cache", None)
     model.config.use_cache = True  # KV cache off during training, on to generate
     preds = []
@@ -250,6 +273,8 @@ def evaluate(model, tok_left, rows, torch, batch_size=48, max_new_tokens=6, limi
                     }
                 )
     model.config.use_cache = prev_cache
+    gc.collect()
+    torch.cuda.empty_cache()
     model.train()
     n = max(1, len(rows))
     return exact / n, casefold / n, preds
@@ -267,8 +292,14 @@ def main() -> int:
     ap.add_argument("--seed", type=int, default=1337)
     ap.add_argument("--epochs", type=float, default=3.0)
     ap.add_argument("--max-steps", type=int, default=0, help="0 = derive from epochs")
-    ap.add_argument("--micro-batch", type=int, default=16)
-    ap.add_argument("--grad-accum", type=int, default=2)
+    ap.add_argument("--micro-batch", type=int, default=8)
+    ap.add_argument(
+        "--token-budget",
+        type=int,
+        default=2048,
+        help="cap on rows*longest-row per micro-batch; 0 disables",
+    )
+    ap.add_argument("--grad-accum", type=int, default=4)
     ap.add_argument("--lr", type=float, default=2e-4)
     ap.add_argument("--warmup-ratio", type=float, default=0.03)
     ap.add_argument("--weight-decay", type=float, default=0.0)
@@ -376,7 +407,9 @@ def main() -> int:
         optim_note = f"torch fused AdamW ({type(exc).__name__})"
 
     micro = args.micro_batch
-    batches = build_batches([lengths[i] for i in usable], micro, args.seed)
+    batches = build_batches(
+        [lengths[i] for i in usable], micro, args.seed, args.token_budget
+    )
     batches = [[usable[j] for j in b] for b in batches]
     steps_per_epoch = max(1, len(batches) // args.grad_accum)
     total_steps = args.max_steps or int(steps_per_epoch * args.epochs)
@@ -392,6 +425,7 @@ def main() -> int:
         "lora": {"r": args.lora_r, "alpha": args.lora_alpha, "dropout": args.lora_dropout,
                   "targets": args.lora_targets},
         "micro_batch": micro,
+        "token_budget": args.token_budget,
         "grad_accum": args.grad_accum,
         "effective_batch": micro * args.grad_accum,
         "lr": args.lr,
@@ -498,8 +532,16 @@ def main() -> int:
             (loss * scale).backward()
             return float(loss.detach()), float(ce.detach()), float(kd.detach()), int(mask.sum())
         except torch.cuda.OutOfMemoryError as exc:
+            # The failed attempt's activations are still bound to this frame's
+            # locals, and the traceback holds the frame itself. Both have to go
+            # before retrying, or each split level adds memory instead of
+            # freeing it -- which is how the second run recursed to a batch of
+            # one and still had 22.8 GiB live.
             exc.__traceback__ = None
             del exc
+            hidden = chosen = sel = logits = None
+            ce = kd = loss = student_lp = teacher_p = None
+            ids = mask = pos = valid = gold = tk_ids = tk_log = None
             gc.collect()
             torch.cuda.empty_cache()
             if len(batch_idx) == 1:
@@ -514,7 +556,9 @@ def main() -> int:
     while step < total_steps and not stop:
         epoch += 1
         if epoch > 1:
-            batches = build_batches([lengths[i] for i in usable], micro, args.seed + epoch)
+            batches = build_batches(
+                [lengths[i] for i in usable], micro, args.seed + epoch, args.token_budget
+            )
             batches = [[usable[j] for j in b] for b in batches]
         for batch_idx in batches:
             loss_v, ce_v, kd_v, n_tok = micro_step(batch_idx, 1.0 / args.grad_accum)

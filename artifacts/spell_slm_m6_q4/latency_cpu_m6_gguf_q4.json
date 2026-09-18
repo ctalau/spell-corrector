@@ -1,0 +1,34 @@
+{
+  "benchmark": "CPU latency Milestone-6 QLoRA 2B direct spelling (llama.cpp GGUF Q4_K_M)",
+  "timestamp_bucharest": "2026-09-18T12:26:41.015971+03:00",
+  "stack": "llama.cpp GGUF Q4_K_M via llama-server (merged QLoRA; MTP metadata rewritten)",
+  "device": "cpu",
+  "stack_details": {
+    "model": "models/gguf/qwen35_2b_direct_qlora_merged-Q4_K_M.gguf",
+    "server": "llama.cpp llama-server",
+    "endpoint": "http://127.0.0.1:8765/v1/chat/completions",
+    "host": "127.0.0.1",
+    "port": 8765,
+    "threads": 8,
+    "context": 1024,
+    "parallel": 1,
+    "prompt_cache": false
+  },
+  "decode": {
+    "greedy": true,
+    "temperature": 0,
+    "max_tokens": 5,
+    "reasoning": "off",
+    "jinja_chat_template": true
+  },
+  "n": 100,
+  "p50_s": 0.3838769739959389,
+  "mean_s": 0.4020794563891832,
+  "wall_s": 40.222060385975055,
+  "acc@1_exact": 0.86,
+  "acc@1_casefold": 0.87,
+  "peak_rss_mib": 3143.98046875,
+  "model_disk_mib": 1215.3588562011719,
+  "approx_load_s": 1.267253,
+  "note": "rewrote block_count 25→24; truncated attention.recurrent_layers 25→24; removed nextn_predict_layers"
+}

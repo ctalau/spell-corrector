@@ -1,0 +1,53 @@
+seed: 1337
+n_eval_samples: 100
+
+# Hold-out: frozen seed-1337 BEA-100 (by error_index + noisy_sentence identity)
+frozen_sample: data/frozen_sample_100.json
+
+# Data sources
+bea_dir: /workspace/spell-corrector/data/bea60k
+wiki_path: /workspace/spell-corrector/data/wikipedia_misspellings.txt
+gold_overrides: /workspace/llm-judge-100-sentword/gold_overrides.json
+
+# Train data build (direct word prediction — one row per typo)
+train_data_dir: data/direct_train
+max_bea_typos: 20000          # non-held-out BEA word errors for train
+val_bea_typos: 500
+max_wiki_pairs: 4067         # optional wiki with minimal marked context
+include_wiki: true
+wiki_sentence_template: "<TYPO>{typo}</TYPO>"
+
+# Model / LoRA — fresh from base (do NOT continue from M3 reranker adapter)
+base_model: Qwen/Qwen3.5-0.8B
+revision: 2fc06364715b967f1860aea9cf38778875588b17
+prompt: prompts/direct_correct_v1.txt
+lora:
+  r: 16
+  alpha: 32
+  dropout: 0.05
+  target_modules: [q_proj, k_proj, v_proj, o_proj, gate_proj, up_proj, down_proj]
+train:
+  lr: 2.0e-4
+  epochs: 1
+  per_device_train_batch_size: 2
+  per_device_eval_batch_size: 2
+  gradient_accumulation_steps: 16  # effective batch ~32
+  max_seq_length: 256
+  warmup_ratio: 0.03
+  logging_steps: 20
+  save_steps: 200
+  bf16: true
+  gradient_checkpointing: true
+  eval_during_train: false  # save VRAM; no mid-train eval
+  max_steps: -1
+
+# Generation at eval
+gen:
+  max_new_tokens: 16
+  do_sample: false
+
+# Outputs
+adapter_dir: models/qwen35_0_8b_direct_lora
+eval_predictions: results/predictions_m4_direct.jsonl
+eval_metrics: results/metrics_milestone4.json
+report: docs/milestone4_direct_report.md

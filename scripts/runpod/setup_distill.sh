@@ -96,6 +96,24 @@ PY
 log "CUDA check ($IMAGE_PYTHON)"
 nvidia-smi || echo "nvidia-smi unavailable"
 
+# Fail fast (seconds, not the ~2min of pip installs below) if the CONTAINER
+# itself can't reach CUDA -- nvidia-smi only needs NVML/the driver, but the
+# CUDA runtime API additionally needs /dev/nvidia-uvm mapped and
+# NVIDIA_DRIVER_CAPABILITIES to include "compute". A container missing that
+# shows exactly this split: nvidia-smi works, torch.cuda.is_available() does
+# not, regardless of which torch build is asked to check.
+log "container GPU-passthrough diagnostic"
+echo "NVIDIA_VISIBLE_DEVICES=${NVIDIA_VISIBLE_DEVICES:-unset}"
+echo "NVIDIA_DRIVER_CAPABILITIES=${NVIDIA_DRIVER_CAPABILITIES:-unset}"
+ls -l /dev/nvidia* 2>&1 || echo "no /dev/nvidia* device nodes"
+"$IMAGE_PYTHON" - <<'PY' || echo "base-image torch cannot see CUDA (pre-existing container issue, not this script)"
+try:
+    import torch
+    print("base torch", torch.__version__, "cuda avail", torch.cuda.is_available())
+except Exception as e:
+    print("base image has no usable torch:", e)
+PY
+
 log "apt: hunspell + venv/dev headers"
 (
   export DEBIAN_FRONTEND=noninteractive
@@ -150,13 +168,29 @@ fi
 export_nvidia_ld_library_path
 
 log "CUDA check (venv torch after cu124 install)"
-"$PYTHON" - <<'PY' || die "CUDA-available torch>=2.5.1+cu124 missing"
+# Retry a few times with a short pause: a fresh process right after installing
+# new nvidia-* wheels has occasionally raced a container's GPU attachment on
+# Runpod's community cloud, and torch.cuda.is_available() in a brand new
+# process is cheap enough to just try again rather than fail the whole pod.
+CUDA_OK=0
+for attempt in 1 2 3 4 5; do
+  if "$PYTHON" - <<'PY'
 import torch
 print("torch", torch.__version__, "cuda", torch.version.cuda, "avail", torch.cuda.is_available())
-assert torch.cuda.is_available(), "CUDA is not available"
-assert "cu128" not in torch.__version__, "cu128 wheels fall back to CPU on CUDA 12.4 hosts"
+if not torch.cuda.is_available():
+    raise SystemExit(1)
+if "cu128" in torch.__version__:
+    raise SystemExit(1)
 print("gpu", torch.cuda.get_device_name(0), "bf16", torch.cuda.is_bf16_supported())
 PY
+  then
+    CUDA_OK=1
+    break
+  fi
+  echo "CUDA check attempt $attempt/5 failed; retrying in 10s..."
+  sleep 10
+done
+[ "$CUDA_OK" -eq 1 ] || die "CUDA-available torch>=2.5.1+cu124 missing after 5 attempts"
 
 log "transformers/accelerate/peft/bitsandbytes/datasets"
 pip_install /tmp/pip-transformers.log "transformers>=5.5" "accelerate>=0.34" \

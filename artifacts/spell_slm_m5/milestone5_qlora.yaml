@@ -1,0 +1,62 @@
+milestone: m5_qlora
+system_name: llm_qwen35_0_8b_direct_qlora
+seed: 1337
+n_eval_samples: 100
+
+# Hold-out: same frozen seed-1337 BEA-100 as M4
+frozen_sample: data/frozen_sample_100.json
+
+# Reuse M4 direct train data (same holdout)
+train_data_dir: data/direct_train
+bea_dir: /workspace/spell-corrector/data/bea60k
+wiki_path: /workspace/spell-corrector/data/wikipedia_misspellings.txt
+gold_overrides: /workspace/llm-judge-100-sentword/gold_overrides.json
+
+# Model / QLoRA — prefer continue from M4 LoRA on 4-bit base
+base_model: Qwen/Qwen3.5-0.8B
+revision: 2fc06364715b967f1860aea9cf38778875588b17
+prompt: prompts/direct_correct_v1.txt
+m4_adapter_dir: models/qwen35_0_8b_direct_lora
+continue_from_m4: true   # try load M4 adapters on 4-bit base; fall back to fresh LoRA
+
+quantization:
+  load_in_4bit: true
+  bnb_4bit_quant_type: nf4
+  bnb_4bit_use_double_quant: true
+  bnb_4bit_compute_dtype: bfloat16
+
+lora:
+  r: 16
+  alpha: 32
+  dropout: 0.05
+  target_modules: [q_proj, k_proj, v_proj, o_proj, gate_proj, up_proj, down_proj]
+
+train:
+  lr: 2.0e-4
+  epochs: 1
+  # Speedups vs M4 (batch 2 × accum 16): larger micro-batch, keep effective ~32
+  per_device_train_batch_size: 8
+  per_device_eval_batch_size: 4
+  gradient_accumulation_steps: 4   # effective batch ~32
+  max_seq_length: 256
+  warmup_ratio: 0.03
+  logging_steps: 20
+  save_steps: 200
+  bf16: true
+  # 4-bit usually has headroom — prefer OFF for speed; script falls back ON if OOM
+  gradient_checkpointing: false
+  eval_during_train: false
+  max_steps: -1
+  torch_compile: true  # attempted; Trainer rejects compile+QLoRA — script auto-skips
+  # Fallback chain if OOM: batch 8→4 (accum 8), then enable grad checkpointing
+
+gen:
+  max_new_tokens: 5
+  do_sample: false
+  temperature: 0
+
+# Outputs
+adapter_dir: models/qwen35_0_8b_direct_qlora
+eval_predictions: results/predictions_m5_qlora.jsonl
+eval_metrics: results/metrics_milestone5.json
+report: docs/milestone5_qlora_report.md

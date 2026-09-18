@@ -112,6 +112,37 @@ pip_install() {
     "$PYTHON" -m pip install -q --break-system-packages "$@"
 }
 
+# `nvidia-smi` working proves nothing about CUDA inside the container: a host
+# whose nvidia_uvm module never got loaded shows a healthy GPU and then fails
+# every cudaInit with "CUDA unknown error". One community host did exactly that
+# and burned ten minutes of pip before the failure surfaced, so the probe now
+# runs before any install -- and attempts the standard repair first.
+cuda_ok() {
+    "$PYTHON" -c 'import sys
+try:
+    import torch
+except Exception:
+    sys.exit(3)
+sys.exit(0 if torch.cuda.is_available() else 1)' 2>/dev/null
+}
+
+ensure_cuda() {
+    cuda_ok && return 0
+    echo "CUDA not visible to torch; attempting uvm repair"
+    ls -la /dev/nvidia* 2>&1 | head -20
+    modprobe nvidia_uvm 2>&1 | head -3
+    nvidia-modprobe -u -c=0 2>&1 | head -3
+    [ -e /dev/nvidia-uvm ] || mknod -m 666 /dev/nvidia-uvm c 243 0 2>&1 | head -3
+    [ -e /dev/nvidia-uvm-tools ] || mknod -m 666 /dev/nvidia-uvm-tools c 243 1 2>&1 | head -3
+    cuda_ok
+}
+
+status "probe: CUDA visible to the image's torch"
+if ! ensure_cuda; then
+    fail "CUDA unusable on this host (nvidia-smi works, torch cannot init) -- relaunch elsewhere"
+fi
+"$PYTHON" -c 'import torch;print("preinstalled torch", torch.__version__, torch.cuda.get_device_name(0))'
+
 # ---------------------------------------------------------------------- repo
 status "clone repo"
 GIT_LFS_SKIP_SMUDGE=1 git clone --depth 1 -b "${REPO_BRANCH:-main}" "${REPO_URL}" "$REPO_DIR" \
@@ -135,7 +166,20 @@ ADAPTER_BYTES=$(stat -c%s "$M6_ADAPTER/adapter_model.safetensors" 2>/dev/null ||
 # falls back to CPU on these CUDA 12.4 community hosts.
 status "pip: torch + transformers stack"
 pip_install --upgrade pip setuptools wheel || true
-pip_install torch==2.5.1 --index-url https://download.pytorch.org/whl/cu124 || fail "pip torch"
+TORCH_BEFORE="$("$PYTHON" -c 'import torch;print(torch.__version__)' 2>/dev/null)"
+TORCH_MAJMIN="$("$PYTHON" -c 'import torch;v=torch.__version__.split(".");print(int(v[0])*100+int(v[1]))' 2>/dev/null || echo 0)"
+if [ "${TORCH_MAJMIN:-0}" -lt 205 ]; then
+    echo "upgrading torch from ${TORCH_BEFORE:-none} to 2.5.1+cu124"
+    pip_install torch==2.5.1 --index-url https://download.pytorch.org/whl/cu124 || fail "pip torch"
+    if ! cuda_ok; then
+        echo "torch 2.5.1 cannot see the GPU; reverting to the image's ${TORCH_BEFORE}"
+        pip_install "torch==${TORCH_BEFORE%%+*}" --index-url https://download.pytorch.org/whl/cu124 \
+            || fail "torch revert"
+        ensure_cuda || fail "CUDA broken after torch revert"
+    fi
+else
+    echo "image torch ${TORCH_BEFORE} is new enough; leaving it alone"
+fi
 pip_install "numpy<2.3" safetensors sentencepiece protobuf accelerate datasets pyyaml requests \
     || fail "pip base deps"
 pip_install "git+https://github.com/huggingface/transformers" || fail "pip transformers"

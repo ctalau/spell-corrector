@@ -197,14 +197,41 @@ Results and the full method:
 
 ## Benchmark BEA-60K
 
-BEA-60K is a **locked** benchmark: never train, validate, tune or prompt-search
-on it, and do **not** commit BEA files.
+BEA-60K is a **locked** benchmark for the byte-level reranker above: never
+train, validate, tune or prompt-search on it, and do **not** commit BEA files.
+`tests/test_dataset.py` fails the build if any of that track's
+training-construction files mention it.
 
 ```bash
 python scripts/download_bea60k.py
 python scripts/benchmark_aspell.py
 python scripts/benchmark_bea60k.py --model artifacts/model --output reports/bea60k
 ```
+
+The separate LLM direct-correct track (milestones 3-7, see below) runs a
+narrower, user-approved rule: only a fixed seed-1337 100-example holdout is
+locked, the rest of BEA-60K is usable as training data. See CLAUDE.md's
+"Milestone 7" section before assuming any BEA-60K accuracy number in that
+track is a clean, unseen-benchmark result.
+
+## Milestone 7: distilling Qwen3.5-2B into Qwen3.5-0.8B on BEA-60K
+
+`scripts/distill_2b_to_student.py` distills the milestone-6 teacher
+(`Qwen/Qwen3.5-2B` + QLoRA, 91% Acc@1 on the frozen BEA-100) into a fresh
+`Qwen/Qwen3.5-0.8B` student, both 4-bit NF4, using BEA-60K's own text as the
+distillation corpus (holding out the same 100-sample eval set):
+
+```bash
+python scripts/distill_2b_to_student.py prepare-data
+python scripts/distill_2b_to_student.py label-teacher
+python scripts/distill_2b_to_student.py train --target-acc 0.90
+python scripts/distill_2b_to_student.py eval --adapter-dir artifacts/spell_slm_m7/qwen35_0_8b_distill_qlora
+```
+
+`train` runs per-epoch rounds with a live accuracy gate against the holdout,
+logging each round's loss and Acc@1 to `distill_progress.jsonl`, and stops as
+soon as accuracy exceeds 90% (or a round budget runs out). On Runpod:
+`python scripts/runpod/launch.py --bootstrap-path scripts/runpod/bootstrap_distill.sh --image runpod/pytorch:2.4.0-py3.11-cuda12.4.1-devel-ubuntu22.04 --branch <branch>`.
 
 ## GPU runs
 

@@ -20,11 +20,20 @@ from pathlib import Path
 FILES = ("adapter_model.safetensors", "adapter_config.json", "best_meta.json")
 
 
-def get(url: str, timeout: float = 120.0) -> bytes | None:
+#: Runpod's proxy sits behind Cloudflare, which answers urllib's default user
+#: agent with a 403 (error 1010) -- the same trap scripts/runpod/launch.py
+#: documents. Without this header every download here silently returns nothing.
+HEADERS = {"User-Agent": "spell-corrector-runpod/1.0"}
+
+
+def get(url: str, timeout: float = 120.0, quiet: bool = True) -> bytes | None:
     try:
-        with urllib.request.urlopen(url, timeout=timeout) as resp:
+        req = urllib.request.Request(url, headers=HEADERS)
+        with urllib.request.urlopen(req, timeout=timeout) as resp:
             return resp.read()
-    except Exception:  # noqa: BLE001
+    except Exception as exc:  # noqa: BLE001
+        if not quiet:
+            print(f"fetch failed {url}: {type(exc).__name__}: {exc}", flush=True)
         return None
 
 
@@ -42,7 +51,7 @@ def main() -> int:
     deadline = time.time() + args.max_hours * 3600
 
     while time.time() < deadline:
-        meta_raw = get(f"{base}/artifacts/student/best/best_meta.json", timeout=60)
+        meta_raw = get(f"{base}/artifacts/student/best/best_meta.json", timeout=60, quiet=False)
         metrics = get(f"{base}/PROGRESS", timeout=120)
         if metrics:
             (args.dest / "metrics.jsonl").write_bytes(metrics)

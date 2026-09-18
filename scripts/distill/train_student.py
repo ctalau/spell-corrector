@@ -25,6 +25,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import gc
 import math
 import os
 import random
@@ -166,6 +167,42 @@ def attach_lora(model, args, torch):
         bias="none",
     )
     return get_peft_model(model, cfg), "fresh LoRA"
+
+
+def resolve_answer_head(model, torch):
+    """Return `(forward_hidden, lm_head, note)` for scoring only answer tokens.
+
+    Running the LM head over every position costs `[batch, seq, 248320]` — 2 GiB
+    per forward at micro-batch 16, which is what put the first M7 run 22.3 GiB
+    into a 24 GiB card. Nothing needs those logits: the loss touches at most ten
+    answer positions per row. So the transformer stack is run on its own, the
+    handful of answer positions are selected out of the hidden states, and the
+    LM head is applied to those alone — the same arithmetic, ~25x less memory.
+
+    Falls back to whole-sequence logits if the model does not expose its inner
+    stack in the expected shape.
+    """
+    base = model.get_base_model() if hasattr(model, "get_base_model") else model
+    lm_head = base.get_output_embeddings()
+    inner = getattr(base, "model", None)
+    if lm_head is None or inner is None:
+        return None, None, "fallback: full logits (no inner stack / lm_head)"
+
+    def forward_hidden(ids, mask):
+        out = inner(input_ids=ids, attention_mask=mask, use_cache=False)
+        return out.last_hidden_state if hasattr(out, "last_hidden_state") else out[0]
+
+    try:
+        with torch.no_grad():
+            probe_ids = torch.ones((1, 8), dtype=torch.long, device=model.device)
+            probe_mask = torch.ones_like(probe_ids)
+            hidden = forward_hidden(probe_ids, probe_mask)
+            logits = lm_head(hidden[:, -1])
+        if hidden.dim() != 3 or logits.dim() != 2:
+            return None, None, f"fallback: unexpected shapes {tuple(hidden.shape)}"
+    except Exception as exc:  # noqa: BLE001
+        return None, None, f"fallback: inner stack raised {type(exc).__name__}: {exc}"
+    return forward_hidden, lm_head, "answer-position LM head"
 
 
 def evaluate(model, tok_left, rows, torch, batch_size=48, max_new_tokens=6, limit=0):
@@ -379,6 +416,7 @@ def main() -> int:
     best_acc = -1.0
     step = 0
     micro_step_count = 0
+    oom_splits = [0]
     t0 = time.time()
     loss_acc = ce_acc = kd_acc = 0.0
     loss_n = 0
@@ -386,11 +424,18 @@ def main() -> int:
     model.train()
     stop = False
 
+    forward_hidden, lm_head, head_note = resolve_answer_head(model, torch)
+    print(f"loss head: {head_note}", flush=True)
+    run_meta["loss_head"] = head_note
+    (args.out_dir / "run_meta.json").write_text(json.dumps(run_meta, indent=2), encoding="utf-8")
+
     def micro_step(batch_idx: list[int], scale: float) -> tuple[float, float, float, int]:
         """One forward/backward over `batch_idx`, gradients scaled by `scale`.
 
-        On CUDA OOM the batch is split in half and retried, so a single long
-        example cannot kill an hours-long run.
+        On CUDA OOM the batch is split in half and retried. The exception's
+        traceback is dropped first: it holds the failed frame, and with it every
+        activation in that frame, so retrying without clearing it just OOMs
+        again on a card that looks full.
         """
         try:
             rows_enc = [enc[i] for i in batch_idx]
@@ -424,15 +469,23 @@ def main() -> int:
                 tk_log[k, :al] = torch.tensor(np.asarray(t_logits[i, :al], dtype=np.float32))
 
             dev = model.device
-            logits = model(input_ids=ids.to(dev), attention_mask=mask.to(dev)).logits
+            ids, mask = ids.to(dev, non_blocking=True), mask.to(dev, non_blocking=True)
             pos, valid = pos.to(dev), valid.to(dev)
             gold, tk_ids, tk_log = gold.to(dev), tk_ids.to(dev), tk_log.to(dev)
 
-            sel = torch.gather(
-                logits, 1, pos.unsqueeze(-1).expand(-1, -1, logits.size(-1))
-            ).float()  # [B, Lb, V]
-            n_valid = valid.sum().clamp(min=1)
+            if forward_hidden is not None:
+                hidden = forward_hidden(ids, mask)  # [b, width, H]
+                flat = (torch.arange(b, device=dev).unsqueeze(1) * width + pos).reshape(-1)
+                chosen = hidden.reshape(-1, hidden.size(-1)).index_select(0, flat)
+                sel = lm_head(chosen).float().view(b, Lb, -1)  # [b, Lb, V]
+            else:
+                logits = model(input_ids=ids, attention_mask=mask).logits
+                flat = (torch.arange(b, device=dev).unsqueeze(1) * width + pos).reshape(-1)
+                sel = (
+                    logits.reshape(-1, logits.size(-1)).index_select(0, flat).float().view(b, Lb, -1)
+                )
 
+            n_valid = valid.sum().clamp(min=1)
             ce = -torch.log_softmax(sel, dim=-1).gather(-1, gold.unsqueeze(-1)).squeeze(-1)
             ce = (ce * valid).sum() / n_valid
 
@@ -444,19 +497,18 @@ def main() -> int:
             loss = (1.0 - alpha) * ce + alpha * (T * T) * kd
             (loss * scale).backward()
             return float(loss.detach()), float(ce.detach()), float(kd.detach()), int(mask.sum())
-        except torch.cuda.OutOfMemoryError:
-            if len(batch_idx) == 1:
-                raise
+        except torch.cuda.OutOfMemoryError as exc:
+            exc.__traceback__ = None
+            del exc
+            gc.collect()
             torch.cuda.empty_cache()
+            if len(batch_idx) == 1:
+                raise RuntimeError("OOM on a single example -- lower --max-seq-len")
+            oom_splits[0] += 1
             half = len(batch_idx) // 2
             a = micro_step(batch_idx[:half], scale)
             c = micro_step(batch_idx[half:], scale)
-            return (
-                (a[0] + c[0]) / 2,
-                (a[1] + c[1]) / 2,
-                (a[2] + c[2]) / 2,
-                a[3] + c[3],
-            )
+            return ((a[0] + c[0]) / 2, (a[1] + c[1]) / 2, (a[2] + c[2]) / 2, a[3] + c[3])
 
     epoch = 0
     while step < total_steps and not stop:
@@ -503,6 +555,7 @@ def main() -> int:
                         "elapsed_s": round(elapsed, 1),
                         "eta_min": round((total_steps - step) / max(rate, 1e-9) / 60, 1),
                         "vram_gb": round(torch.cuda.max_memory_allocated() / 2**30, 2),
+                        "oom_splits": oom_splits[0],
                     },
                 )
                 loss_acc = ce_acc = kd_acc = 0.0

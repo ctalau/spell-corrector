@@ -1,0 +1,44 @@
+{
+  "milestone": "m5_qlora_q4_k_m",
+  "seed": 1337,
+  "dataset": "frozen seed-1337 BEA-100",
+  "n": 100,
+  "acc@1_exact": 0.81,
+  "acc@1_casefold": 0.81,
+  "acc@1": 0.81,
+  "latency_s": {
+    "p50": 0.21570526802679524,
+    "mean": 0.24419102268409915,
+    "wall": 24.430796847096644
+  },
+  "decode": {
+    "greedy": true,
+    "temperature": 0,
+    "max_tokens": 5,
+    "reasoning": "off",
+    "jinja_chat_template": true
+  },
+  "stack": {
+    "model": "models/gguf/qwen35_0_8b_direct_qlora_merged-Q4_K_M.gguf",
+    "server": "llama.cpp llama-server",
+    "endpoint": "http://127.0.0.1:8765/v1/chat/completions",
+    "host": "127.0.0.1",
+    "port": 8765,
+    "threads": 8,
+    "context": 1024,
+    "parallel": 1,
+    "prompt_cache": false
+  },
+  "input": "results/predictions_m5_qlora.jsonl",
+  "output": "results/predictions_m5_qlora_q4.jsonl",
+  "comparison": {
+    "m5_gpu_acc@1_casefold": 0.82,
+    "m5_gpu_acc@1_exact": 0.81,
+    "m5_cpu_hf_casefold": 0.82,
+    "m5_cpu_hf_exact": 0.81,
+    "m4_q4_gguf_casefold": 0.86,
+    "m4_q4_gguf_exact": 0.85,
+    "delta_casefold_vs_m5_gpu": -0.009999999999999898,
+    "delta_exact_vs_m5_gpu": 0.0
+  }
+}

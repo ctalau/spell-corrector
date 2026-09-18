@@ -1,0 +1,52 @@
+{
+  "milestone": "m6_qlora_2b_q4_k_m",
+  "seed": 1337,
+  "dataset": "frozen seed-1337 BEA-100",
+  "n": 100,
+  "acc@1_exact": 0.86,
+  "acc@1_casefold": 0.87,
+  "acc@1": 0.87,
+  "latency_s": {
+    "p50": 0.3838769739959389,
+    "mean": 0.4020794563891832,
+    "wall": 40.222060385975055
+  },
+  "decode": {
+    "greedy": true,
+    "temperature": 0,
+    "max_tokens": 5,
+    "reasoning": "off",
+    "jinja_chat_template": true
+  },
+  "stack": {
+    "model": "models/gguf/qwen35_2b_direct_qlora_merged-Q4_K_M.gguf",
+    "server": "llama.cpp llama-server",
+    "endpoint": "http://127.0.0.1:8765/v1/chat/completions",
+    "host": "127.0.0.1",
+    "port": 8765,
+    "threads": 8,
+    "context": 1024,
+    "parallel": 1,
+    "prompt_cache": false
+  },
+  "resources": {
+    "peak_rss_mib": 3143.98046875,
+    "rss_mib_at_start": 3143.98046875,
+    "model_disk_bytes": 1274396128,
+    "model_disk_mib": 1215.3588562011719,
+    "approx_load_s": 1.267253
+  },
+  "mtp_fix": "rewrote block_count 25→24; truncated attention.recurrent_layers 25→24; removed nextn_predict_layers",
+  "input": "results/predictions_m6_qlora_2b.jsonl",
+  "output": "results/predictions_m6_qlora_2b_q4.jsonl",
+  "comparison": {
+    "m6_gpu_acc@1_casefold": 0.91,
+    "m6_gpu_acc@1_exact": 0.91,
+    "m5_q4_gguf_casefold": 0.81,
+    "m5_q4_gguf_exact": 0.81,
+    "m4_q4_gguf_casefold": 0.86,
+    "m4_q4_gguf_exact": 0.85,
+    "delta_casefold_vs_m6_gpu": -0.040000000000000036,
+    "delta_exact_vs_m6_gpu": -0.050000000000000044
+  }
+}

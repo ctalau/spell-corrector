@@ -1,0 +1,71 @@
+{
+  "task": "direct_correct_qlora",
+  "mode": "fresh_lora",
+  "attach_detail": {
+    "continue_from_m4_requested": false,
+    "m4_adapter_dir": "/workspace/spell-slm-candidate-rerank/models/qwen35_0_8b_direct_lora",
+    "continued_from_m4": false,
+    "fresh_lora": true
+  },
+  "continued_from_m4": false,
+  "fresh_lora_on_4bit": true,
+  "base_model": "Qwen/Qwen3.5-2B",
+  "revision": "15852e8c16360a2fea060d615a32b45270f8a8fc",
+  "quantization": {
+    "load_in_4bit": true,
+    "bnb_4bit_quant_type": "nf4",
+    "bnb_4bit_use_double_quant": true,
+    "bnb_4bit_compute_dtype": "bfloat16"
+  },
+  "adapter_dir": "/workspace/spell-slm-candidate-rerank/models/qwen35_2b_direct_qlora",
+  "seed": 1337,
+  "n_train": 24066,
+  "n_val": 500,
+  "lora": {
+    "r": 16,
+    "alpha": 32,
+    "dropout": 0.05,
+    "target_modules": [
+      "q_proj",
+      "k_proj",
+      "v_proj",
+      "o_proj",
+      "gate_proj",
+      "up_proj",
+      "down_proj"
+    ]
+  },
+  "train": {
+    "per_device_train_batch_size": 2,
+    "gradient_accumulation_steps": 16,
+    "gradient_checkpointing": true,
+    "effective_batch": 32,
+    "lr": 0.0002,
+    "optim": "paged_adamw_8bit",
+    "epochs": 1.0,
+    "max_steps": -1,
+    "max_seq_length": 256,
+    "torch_compile": "skipped_quantized_peft_incompatible"
+  },
+  "kernels": {
+    "causal_conv1d": false,
+    "flash_linear_attention": false,
+    "flash_attn": false,
+    "notes": [
+      "causal_conv1d missing: No module named 'causal_conv1d'",
+      "flash_linear_attention missing: No module named 'flash_linear_attention'",
+      "flash_attn missing: No module named 'flash_attn'"
+    ]
+  },
+  "train_loss": 0.2580336780345456,
+  "n_loss_logs": 37,
+  "first_logged_loss": 0.4474174022674561,
+  "last_logged_loss": 0.18262736797332763,
+  "elapsed_s": 4623.695268630981,
+  "peak_vram_gb": 5.313834190368652,
+  "gpu": "NVIDIA GeForce RTX 3090",
+  "torch": "2.5.1+cu124",
+  "transformers": "5.18.0.dev0",
+  "bitsandbytes": "0.50.2",
+  "peft": "0.21.0"
+}

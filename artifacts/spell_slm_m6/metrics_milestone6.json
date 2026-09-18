@@ -1,0 +1,33 @@
+{
+  "milestone": "m6_qlora_2b",
+  "seed": 1337,
+  "n": 100,
+  "acc@1_exact": 0.91,
+  "acc@1_casefold": 0.91,
+  "acc@1": 0.91,
+  "latency_s": {
+    "p50": 0.09523880481719971,
+    "p90": 0.1313736915588379,
+    "p99": 0.17404723644256798,
+    "mean": 0.11695053339004517,
+    "wall": 11.727975368499756
+  },
+  "baselines": {
+    "hunspell_top1": 0.6,
+    "m3_reranker_classic_mix": 0.85,
+    "luna_freeform_firsttry": 0.94,
+    "jev_choice_approx": 0.91,
+    "m4_direct_bf16_lora": 0.84,
+    "m4_direct_q4_gguf_exact": 0.85,
+    "m4_direct_q4_gguf_casefold": 0.86,
+    "m5_qlora_casefold": 0.82,
+    "m5_qlora_exact": 0.81,
+    "m5_cpu_hf_casefold": 0.82
+  },
+  "adapter_dir": "models/qwen35_2b_direct_qlora",
+  "base_model": "Qwen/Qwen3.5-2B",
+  "revision": "15852e8c16360a2fea060d615a32b45270f8a8fc",
+  "device": "cuda",
+  "gpu": "NVIDIA GeForce RTX 3090",
+  "system_name": "llm_qwen35_2b_direct_qlora"
+}

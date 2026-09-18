@@ -1,0 +1,60 @@
+milestone: m6_qlora_2b
+system_name: llm_qwen35_2b_direct_qlora
+seed: 1337
+n_eval_samples: 100
+
+# Hold-out: same frozen seed-1337 BEA-100 as M4/M5
+frozen_sample: data/frozen_sample_100.json
+
+# Reuse M4/M5 direct train data (same holdout)
+train_data_dir: data/direct_train
+bea_dir: /workspace/spell-corrector/data/bea60k
+wiki_path: /workspace/spell-corrector/data/wikipedia_misspellings.txt
+gold_overrides: /workspace/llm-judge-100-sentword/gold_overrides.json
+
+# Model / QLoRA — FRESH LoRA on 2B (do NOT continue M4/M5; different base size)
+base_model: Qwen/Qwen3.5-2B
+revision: 15852e8c16360a2fea060d615a32b45270f8a8fc
+prompt: prompts/direct_correct_v1.txt
+m4_adapter_dir: models/qwen35_0_8b_direct_lora
+continue_from_m4: false
+
+quantization:
+  load_in_4bit: true
+  bnb_4bit_quant_type: nf4
+  bnb_4bit_use_double_quant: true
+  bnb_4bit_compute_dtype: bfloat16
+
+lora:
+  r: 16
+  alpha: 32
+  dropout: 0.05
+  target_modules: [q_proj, k_proj, v_proj, o_proj, gate_proj, up_proj, down_proj]
+
+train:
+  lr: 2.0e-4
+  epochs: 1
+  # OOM-safe start on 24GB 3090; train script ladders down on OOM
+  per_device_train_batch_size: 2
+  per_device_eval_batch_size: 2
+  gradient_accumulation_steps: 16   # effective batch ~32
+  max_seq_length: 256
+  warmup_ratio: 0.03
+  logging_steps: 20
+  save_steps: 200
+  bf16: true
+  gradient_checkpointing: true
+  eval_during_train: false
+  max_steps: -1
+  torch_compile: true  # attempted; Trainer usually rejects compile+QLoRA — script auto-skips
+
+gen:
+  max_new_tokens: 5
+  do_sample: false
+  temperature: 0
+
+# Outputs
+adapter_dir: models/qwen35_2b_direct_qlora
+eval_predictions: results/predictions_m6_qlora_2b.jsonl
+eval_metrics: results/metrics_milestone6.json
+report: docs/milestone6_qlora_2b_report.md

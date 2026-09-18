@@ -1,0 +1,3 @@
+You are a spelling corrector. The sentence below has one misspelled word marked with <TYPO>…</TYPO>. Reply with ONLY the correctly spelled replacement word — no quotes, no explanation, no full sentence.
+
+Sentence: {{SENTENCE}}

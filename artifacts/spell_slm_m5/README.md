@@ -13,3 +13,7 @@ Continue-from-M4 QLoRA adapters + GPU eval + **CPU HF fallback** metrics.
 - `metrics_m5_cpu_hf.json` / `latency_cpu_m5_hf.json` — CPU HF
 - `milestone5_qlora_report.md` — write-up
 - `direct_correct_v1.txt` — prompt
+
+## CPU / GGUF
+- HF CPU: Acc@1 81%/82%, p50 ~0.35s (`metrics_m5_cpu_hf.json`)
+- GGUF Q4_K_M: Acc@1 81%/81%, p50 ~0.22s (`metrics_m5_qlora_q4_bea100.json`, `qwen35_0_8b_direct_qlora_merged-Q4_K_M.gguf`)

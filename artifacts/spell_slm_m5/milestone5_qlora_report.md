@@ -96,6 +96,21 @@ Files: `results/metrics_m5_cpu_hf.json`, `results/latency_cpu_m5_hf.json`, `resu
 
 Merged HF weights kept at `models/qwen35_0_8b_direct_qlora_merged/` (for a future GGUF fix). Partial GGUF artifacts under `models/gguf/qwen35_0_8b_direct_qlora_merged-*.gguf` (not used for metrics).
 
+
+
+### GGUF Q4_K_M path (fixed)
+
+After rewriting GGUF metadata (`nextn_predict_layers` removed; `attention.recurrent_layers` truncated 25→24 to match `block_count=24`), llama.cpp loads and serves.
+
+| Metric | M5 GGUF Q4 | M5 CPU HF | M4 GGUF Q4 |
+|---|---:|---:|---:|
+| Acc@1 casefold | **81%** | 82% | 86% |
+| Acc@1 exact | **81%** | 81% | 85% |
+| latency p50 | **0.216 s** | 0.350 s | ~0.22 s |
+| wall (100) | **24.4 s** | 47.7 s | ~26 s |
+
+Files: `results/metrics_m5_qlora_q4_bea100.json`, `results/latency_cpu_m5_gguf_q4.json`, `results/predictions_m5_qlora_q4.jsonl`, `models/gguf/qwen35_0_8b_direct_qlora_merged-Q4_K_M.gguf`.
+
 ## RunPod
 
 - Pod id: **`4wy2rw06dk9f0x`**

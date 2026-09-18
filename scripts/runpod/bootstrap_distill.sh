@@ -78,7 +78,11 @@ sync_artifacts() {
     cp -r "$RESULTS" "$OUT/artifacts/" 2>/dev/null
     mkdir -p "$OUT/artifacts/student"
     cp "$STUDENT_OUT"/{STATUS,metrics.jsonl,run_meta.json,train_summary.json} "$OUT/artifacts/student/" 2>/dev/null
+    # Both the best-so-far and the most recent adapter are published: a pod that
+    # dies mid-run should cost only the steps since the last evaluation, and the
+    # orchestrator pulls these down with scripts/distill/fetch_checkpoints.py.
     cp -r "$STUDENT_OUT/best" "$OUT/artifacts/student/" 2>/dev/null
+    cp -r "$STUDENT_OUT/last" "$OUT/artifacts/student/" 2>/dev/null
     cp "$TEACHER_OUT/meta.json" "$OUT/artifacts/teacher_meta.json" 2>/dev/null
     cp "$REPO_DIR/data/distill/meta.json" "$OUT/artifacts/data_meta.json" 2>/dev/null
     cp "$STUDENT_OUT/metrics.jsonl" "$OUT/PROGRESS" 2>/dev/null

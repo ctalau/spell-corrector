@@ -208,7 +208,10 @@ FLA_PID=$!
   PYTAG=$("$PYTHON" -c 'import sys;print(f"cp{sys.version_info[0]}{sys.version_info[1]}")')
   URL="https://github.com/Dao-AILab/flash-attention/releases/download/v${FA_VER}/flash_attn-${FA_VER}+cu12torch2.5cxx11abiFALSE-${PYTAG}-${PYTAG}-linux_x86_64.whl"
   echo "flash-attn wheel: $URL"
-  curl -fsSL --max-time 900 -o /tmp/flash_attn.whl "$URL" && pip_install /tmp/flash_attn.whl \
+  # pip parses the *filename*, so the download has to keep the wheel's own name
+  # (a /tmp/flash_attn.whl is rejected as "wrong number of parts").
+  WHEEL="/tmp/$(basename "$URL")"
+  curl -fsSL --max-time 900 -o "$WHEEL" "$URL" && pip_install "$WHEEL" \
       || echo "flash-attn wheel unavailable; SDPA will be used"
 ) &
 FA_PID=$!

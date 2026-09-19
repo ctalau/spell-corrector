@@ -44,6 +44,27 @@ test("extractRunpodText reads OpenAI chat completions", () => {
   assert.equal(extractRunpodText(job), "climbing");
 });
 
+test("extractRunpodText reads the live worker-vllm chat.completion wrapper", () => {
+  const job = {
+    delayTime: 272014,
+    executionTime: 580,
+    status: "COMPLETED",
+    output: [
+      {
+        choices: [
+          {
+            finish_reason: "stop",
+            message: { content: "climbing", role: "assistant" },
+          },
+        ],
+        object: "chat.completion",
+      },
+    ],
+  };
+  assert.equal(extractRunpodText(job), "climbing");
+  assert.equal(normalizeCorrection(extractRunpodText(job)), "climbing");
+});
+
 test("extractRunpodText handles streamed-style arrays and think tags", () => {
   const job = {
     output: [

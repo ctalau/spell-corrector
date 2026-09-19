@@ -234,9 +234,11 @@ them:
 Without `RUNPOD_API_KEY`, Local still works; the RunPod option returns HTTP 503
 with a clear error. The proxy uses greedy OpenAI-style chat
 (`chat_template_kwargs.enable_thinking = false`, `max_tokens = 5`) and the same
-`direct_correct_v1.txt` prompt as Local. GPU workers scale to zero, so the
-first request after idle can take up to a minute (`api/correct-runpod.js` is
-allowed 60s).
+`direct_correct_v1.txt` prompt as Local. GPU workers scale to zero; a true
+cold start (image pull + vLLM compile) can take several minutes. The proxy
+waits about 55s (`maxDuration: 60`) and returns HTTP 504 with a retry message
+if the worker is still booting. Once warm, a correction is typically
+sub-second.
 
 ## Design constraints
 

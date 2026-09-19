@@ -111,7 +111,8 @@
 </fieldset>
 <p class="hint">
   Local runs the Q4_K_M GGUF on Vercel. RunPod proxies to the GPU Serverless
-  endpoint (the API key stays on the server). A GPU cold start can take up to a minute.
+  endpoint (the API key stays on the server). After idle, a GPU worker can take
+  several minutes to boot; if the request times out, wait and retry.
 </p>
 
 <div id="status">Loading dictionary&hellip;</div>

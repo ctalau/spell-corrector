@@ -11,7 +11,7 @@
       url: "/api/correct-runpod",
       label: "RunPod GPU",
       running:
-        "Calling RunPod GPU (a cold start can take up to a minute while a worker boots)...",
+        "Calling RunPod GPU (if the worker was idle this can take several minutes; if it times out, wait and retry)...",
     },
   };
 

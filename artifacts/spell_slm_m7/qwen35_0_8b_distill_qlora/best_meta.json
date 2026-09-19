@@ -1,0 +1,5 @@
+{
+  "step": 4750,
+  "dev_acc_exact": 0.87,
+  "dev_acc_casefold": 0.878
+}

@@ -344,6 +344,8 @@ status "quantize Q4_K_M"
     "$WORK/qwen35_0_8b_distilled_q4-Q4_K_M.gguf" Q4_K_M || fail "llama-quantize"
 GGUF="$WORK/qwen35_0_8b_distilled_q4-Q4_K_M.gguf"
 
+# Conversion keeps the MTP head (the converter asserts on its absence) and so
+# emits block_count=25 against 24 real blocks -- the M5/M6 bug. Repaired here.
 status "check GGUF metadata (MTP / block_count)"
 if ! "$PYTHON" "$REPO_DIR/scripts/distill/check_gguf.py" "$GGUF" \
         --report "$RESULTS/gguf_metadata.json"; then

@@ -4,10 +4,12 @@
 Two Qwen3.5 specifics are handled here rather than after conversion:
 
 * the multi-token-prediction head (`mtp.*`, `mtp_num_hidden_layers: 1`) is
-  dropped. llama.cpp does not convert those tensors but still counts the layer,
-  which is what produced M5/M6's `block_count=25` against 24 real blocks and
-  made the GGUF unloadable until its metadata was rewritten.
-* the vision tower is dropped: this is a text-only corrector.
+  **kept**. llama.cpp's Qwen3.5 converter asserts `mtp_num_hidden_layers != 0`,
+  so stripping it before conversion fails outright; it then drops the MTP
+  tensors while still counting the layer, which is what produced M5/M6's
+  `block_count=25` against 24 real blocks. That is repaired after conversion by
+  `check_gguf.py --fix`, not before it. `--strip-mtp` is kept for a converter
+  that ever stops asserting.
 """
 from __future__ import annotations
 
@@ -23,7 +25,7 @@ def main() -> int:
     ap.add_argument("--revision", default="")
     ap.add_argument("--adapter", type=Path, required=True)
     ap.add_argument("--out-dir", type=Path, required=True)
-    ap.add_argument("--keep-mtp", action="store_true")
+    ap.add_argument("--strip-mtp", action="store_true")
     args = ap.parse_args()
 
     import torch
@@ -60,7 +62,7 @@ def main() -> int:
     )
     tok.save_pretrained(str(args.out_dir))
 
-    if not args.keep_mtp:
+    if args.strip_mtp:
         strip_mtp(args.out_dir)
     print(f"merged model written to {args.out_dir}", flush=True)
     return 0

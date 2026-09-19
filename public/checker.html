@@ -1,0 +1,275 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Spell checker (highlighter)</title>
+<style>
+  body { font-family: system-ui, sans-serif; max-width: 720px; margin: 3rem auto; padding: 0 1rem; color: #1a1a1a; }
+  p.hint { color: #666; font-size: 0.9rem; }
+  #status { color: #666; font-size: 0.85rem; margin-bottom: 0.5rem; min-height: 1.2em; }
+
+  .editor-wrap {
+    position: relative;
+    width: 100%;
+  }
+  .editor-layer {
+    box-sizing: border-box;
+    width: 100%;
+    height: 12rem;
+    margin: 0;
+    padding: 0.75rem;
+    border: 1px solid #ccc;
+    border-radius: 6px;
+    font: inherit;
+    font-size: 1rem;
+    line-height: 1.5;
+    white-space: pre-wrap;
+    word-wrap: break-word;
+    overflow-wrap: break-word;
+    overflow: auto;
+  }
+  /* Bottom layer: the real, editable textarea. Text is normally visible. */
+  #input {
+    position: relative;
+    z-index: 1;
+    resize: none;
+    background: #fff;
+    color: #1a1a1a;
+  }
+  /* Top layer: same text, invisible, except misspelled words get a visible
+     underline drawn exactly over the textarea's own glyphs beneath. Stacked
+     above the textarea (higher z-index) so its .typo spans can intercept
+     clicks; pointer-events:none on the layer itself lets typing/clicks pass
+     through to the textarea everywhere else. */
+  #highlights {
+    position: absolute;
+    top: 0;
+    left: 0;
+    z-index: 2;
+    color: transparent;
+    border-color: transparent;
+    pointer-events: none;
+  }
+  #highlights .typo {
+    pointer-events: auto;
+    cursor: pointer;
+    text-decoration: wavy underline;
+    text-decoration-color: #e11d48;
+    text-decoration-thickness: 2px;
+    text-decoration-skip-ink: none;
+  }
+
+  .popover {
+    position: fixed;
+    z-index: 10;
+    max-width: 260px;
+    background: #1a1a1a;
+    color: #fff;
+    padding: 0.6rem 0.75rem;
+    border-radius: 6px;
+    font-size: 0.9rem;
+    box-shadow: 0 4px 14px rgba(0, 0, 0, 0.25);
+  }
+  .popover .word {
+    text-decoration: line-through;
+    opacity: 0.7;
+  }
+  .popover .suggestion {
+    font-weight: 600;
+    color: #7ee787;
+  }
+  .popover button {
+    margin-top: 0.5rem;
+    margin-right: 0.4rem;
+    padding: 0.25rem 0.6rem;
+    font-size: 0.8rem;
+    cursor: pointer;
+  }
+</style>
+</head>
+<body>
+<h1>Spell checker — highlighter</h1>
+<p class="hint">
+  Misspelled words are underlined by a client-side dictionary
+  (<a href="https://github.com/cfinke/Typo.js" target="_blank" rel="noopener">Typo.js</a>,
+  loaded from a CDN). Click an underlined word to fetch the correction from the
+  fine-tuned model.
+</p>
+
+<div id="status">Loading dictionary&hellip;</div>
+
+<div class="editor-wrap">
+  <div id="highlights" class="editor-layer" aria-hidden="true"></div>
+  <textarea id="input" class="editor-layer" spellcheck="false"></textarea>
+</div>
+
+<p><a href="/index.html">&larr; back to the raw correction form</a></p>
+
+<script src="https://cdn.jsdelivr.net/npm/typo-js@1.2.1/typo.js"></script>
+<script>
+  const DICT_BASE = "https://cdn.jsdelivr.net/npm/typo-js@1.2.1/dictionaries/en_US";
+  const input = document.getElementById("input");
+  const highlights = document.getElementById("highlights");
+  const status = document.getElementById("status");
+
+  const SAMPLE = "I discoverd the name of my illness while reading a magazine artical.";
+  input.value = SAMPLE;
+
+  let dictionary = null;
+  let popoverEl = null;
+  let debounceTimer = null;
+
+  function escapeHtml(s) {
+    return s
+      .replace(/&/g, "&amp;")
+      .replace(/</g, "&lt;")
+      .replace(/>/g, "&gt;");
+  }
+
+  function buildHighlightHTML(text) {
+    const wordRe = /[A-Za-z']+/g;
+    let html = "";
+    let lastIndex = 0;
+    let match;
+    while ((match = wordRe.exec(text))) {
+      const word = match[0];
+      const start = match.index;
+      const end = start + word.length;
+      html += escapeHtml(text.slice(lastIndex, start));
+      if (word.length > 1 && dictionary && !dictionary.check(word)) {
+        html += `<span class="typo" data-start="${start}" data-end="${end}">${escapeHtml(word)}</span>`;
+      } else {
+        html += escapeHtml(word);
+      }
+      lastIndex = end;
+    }
+    html += escapeHtml(text.slice(lastIndex));
+    // Trailing newline keeps the overlay's height in sync with the textarea
+    // when the text itself ends in one.
+    return html + "\n";
+  }
+
+  function renderHighlights() {
+    highlights.innerHTML = buildHighlightHTML(input.value);
+  }
+
+  function scheduleRender() {
+    clearTimeout(debounceTimer);
+    debounceTimer = setTimeout(renderHighlights, 200);
+  }
+
+  input.addEventListener("input", scheduleRender);
+  input.addEventListener("scroll", () => {
+    highlights.scrollTop = input.scrollTop;
+    highlights.scrollLeft = input.scrollLeft;
+  });
+
+  // A sentence is the smallest span around the clicked word that we send to
+  // the model, matching the single-sentence, single-<TYPO> format api/correct.js
+  // expects -- not the whole textarea, which could be several paragraphs.
+  function extractSentence(text, wordStart, wordEnd) {
+    let start = 0;
+    for (let i = wordStart - 1; i >= 0; i--) {
+      if (/[.!?\n]/.test(text[i])) { start = i + 1; break; }
+    }
+    let end = text.length;
+    for (let i = wordEnd; i < text.length; i++) {
+      if (/[.!?\n]/.test(text[i])) { end = i + 1; break; }
+    }
+    const sentence = text.slice(start, end);
+    const localStart = wordStart - start;
+    const localEnd = wordEnd - start;
+    const wrapped =
+      sentence.slice(0, localStart) +
+      "<TYPO>" + sentence.slice(localStart, localEnd) + "</TYPO>" +
+      sentence.slice(localEnd);
+    return wrapped.trim();
+  }
+
+  function closePopover() {
+    if (popoverEl) {
+      popoverEl.remove();
+      popoverEl = null;
+    }
+  }
+
+  function showPopover(rect, word) {
+    closePopover();
+    popoverEl = document.createElement("div");
+    popoverEl.className = "popover";
+    popoverEl.style.left = `${Math.round(rect.left)}px`;
+    popoverEl.style.top = `${Math.round(rect.bottom + 6)}px`;
+    popoverEl.innerHTML = `<span class="word">${escapeHtml(word)}</span> &rarr; checking model&hellip;`;
+    document.body.appendChild(popoverEl);
+    return popoverEl;
+  }
+
+  async function fetchCorrection(sentenceWithTypo) {
+    const res = await fetch("/api/correct", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ sentence: sentenceWithTypo }),
+    });
+    if (!res.ok) {
+      const body = await res.json().catch(() => ({}));
+      throw new Error(body.error || `HTTP ${res.status}`);
+    }
+    return res.json();
+  }
+
+  highlights.addEventListener("click", async (ev) => {
+    const span = ev.target.closest(".typo");
+    if (!span) return;
+
+    const start = Number(span.dataset.start);
+    const end = Number(span.dataset.end);
+    const word = input.value.slice(start, end);
+    const rect = span.getBoundingClientRect();
+    const pop = showPopover(rect, word);
+
+    try {
+      const sentence = extractSentence(input.value, start, end);
+      const data = await fetchCorrection(sentence);
+      if (popoverEl !== pop) return; // a newer click superseded this one
+      pop.innerHTML = `
+        <span class="word">${escapeHtml(word)}</span> &rarr;
+        <span class="suggestion">${escapeHtml(data.correction || "(no answer)")}</span>
+        <br>
+        <button type="button" id="apply-btn">Apply</button>
+        <button type="button" id="close-btn">Dismiss</button>
+      `;
+      pop.querySelector("#apply-btn").addEventListener("click", () => {
+        input.value = input.value.slice(0, start) + data.correction + input.value.slice(end);
+        renderHighlights();
+        closePopover();
+      });
+      pop.querySelector("#close-btn").addEventListener("click", closePopover);
+    } catch (err) {
+      if (popoverEl === pop) {
+        pop.textContent = "Error: " + err.message;
+      }
+    }
+  });
+
+  document.addEventListener("click", (ev) => {
+    if (popoverEl && !popoverEl.contains(ev.target) && !ev.target.closest(".typo")) {
+      closePopover();
+    }
+  });
+
+  Promise.all([
+    fetch(`${DICT_BASE}/en_US.aff`).then((r) => r.text()),
+    fetch(`${DICT_BASE}/en_US.dic`).then((r) => r.text()),
+  ])
+    .then(([affData, wordsData]) => {
+      dictionary = new Typo("en_US", affData, wordsData);
+      status.textContent = "Dictionary loaded. Type below, or edit the sample text.";
+      renderHighlights();
+    })
+    .catch((err) => {
+      status.textContent = "Failed to load dictionary: " + err.message;
+    });
+</script>
+</body>
+</html>

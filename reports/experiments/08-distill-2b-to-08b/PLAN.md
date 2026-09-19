@@ -2,12 +2,12 @@
 
 | | |
 |---|---|
-| Status | running |
+| Status | completed — see [README.md](README.md) |
 | Started | 2026-09-18 |
 | Branch | `claude/distill-2b-to-07b-bea-fsqdjt` |
 | Teacher | `Qwen/Qwen3.5-2B` + M6 QLoRA adapters, 4-bit NF4 — 91% Acc@1 on the frozen BEA-100 |
 | Student | `Qwen/Qwen3.5-0.8B`, 4-bit NF4 QLoRA, fresh LoRA r=32 |
-| Goal | student above 90% Acc@1, served as Q4_K_M GGUF |
+| Goal | student above 90% Acc@1, served as Q4_K_M GGUF — **missed**: 87.30% at n=2,000, against a teacher measured at 88.75% |
 
 ## Why
 

@@ -1,0 +1,9 @@
+{
+  "file": "/tmp/m7/fixed.gguf",
+  "architecture": "qwen35",
+  "tensor_blocks": 24,
+  "declared_block_count": 24,
+  "recurrent_layers_len": 24,
+  "has_nextn_predict_layers": false,
+  "consistent": true
+}

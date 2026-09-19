@@ -1,0 +1,24 @@
+{
+  "label": "m7_student_nf4_test",
+  "split": "data/distill/test.jsonl",
+  "n": 2000,
+  "acc@1_exact": 0.8645,
+  "acc@1_casefold": 0.873,
+  "base_model": "Qwen/Qwen3.5-0.8B",
+  "revision": "",
+  "adapter": "/workspace/m7/student/best",
+  "quantization": "nf4 double-quant, bf16 compute",
+  "decode": {
+    "greedy": true,
+    "max_new_tokens": 6
+  },
+  "batched_wall_seconds": 31.35,
+  "device": "cuda",
+  "gpu": "NVIDIA GeForce RTX 3090",
+  "latency_s_batch1": {
+    "n": 100,
+    "p50": 0.3103981018066406,
+    "p90": 0.31369709968566895,
+    "mean": 0.3108180475234985
+  }
+}

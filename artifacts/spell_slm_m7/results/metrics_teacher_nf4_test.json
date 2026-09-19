@@ -1,0 +1,24 @@
+{
+  "label": "m6_teacher_nf4_test",
+  "split": "data/distill/test.jsonl",
+  "n": 2000,
+  "acc@1_exact": 0.8795,
+  "acc@1_casefold": 0.8875,
+  "base_model": "Qwen/Qwen3.5-2B",
+  "revision": "15852e8c16360a2fea060d615a32b45270f8a8fc",
+  "adapter": "/workspace/spell-corrector/artifacts/spell_slm_m6/qwen35_2b_direct_qlora",
+  "quantization": "nf4 double-quant, bf16 compute",
+  "decode": {
+    "greedy": true,
+    "max_new_tokens": 6
+  },
+  "batched_wall_seconds": 41.99,
+  "device": "cuda",
+  "gpu": "NVIDIA GeForce RTX 3090",
+  "latency_s_batch1": {
+    "n": 100,
+    "p50": 0.3182508945465088,
+    "p90": 0.32341742515563965,
+    "mean": 0.31923106908798216
+  }
+}

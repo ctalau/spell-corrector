@@ -1,0 +1,40 @@
+{
+  "base_model": "Qwen/Qwen3.5-0.8B",
+  "revision": "2fc06364715b967f1860aea9cf38778875588b17",
+  "teacher": {
+    "base_model": "Qwen/Qwen3.5-2B",
+    "adapter_dir": "/workspace/spell-corrector/artifacts/spell_slm_m6/qwen35_2b_direct_qlora",
+    "topk": 64,
+    "teacher_forced_token_agreement": 0.9487307117969139
+  },
+  "kd_alpha": 0.5,
+  "kd_temperature": 2.0,
+  "lora": {
+    "r": 32,
+    "alpha": 64,
+    "dropout": 0.05,
+    "targets": "q_proj,k_proj,v_proj,o_proj,gate_proj,up_proj,down_proj"
+  },
+  "micro_batch": 8,
+  "token_budget": 2048,
+  "grad_accum": 4,
+  "effective_batch": 32,
+  "lr": 0.0002,
+  "epochs": 3.0,
+  "total_optimizer_steps": 6024,
+  "n_train": 64277,
+  "attn_implementation": "flash_attention_2",
+  "liger": "applied",
+  "optimizer": "bnb.PagedAdamW8bit",
+  "gradient_checkpointing": false,
+  "kernels": {
+    "flash_attn": "2.7.4.post1",
+    "liger_kernel": "ok",
+    "causal_conv1d": "missing (ModuleNotFoundError)",
+    "fla": "missing (TypeError)"
+  },
+  "trainable_params": 12779520,
+  "total_params": 568199232,
+  "seed": 1337,
+  "loss_head": "answer-position LM head"
+}

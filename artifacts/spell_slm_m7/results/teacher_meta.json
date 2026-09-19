@@ -1,0 +1,17 @@
+{
+  "n_rows": 64295,
+  "rows_with_answer": 64277,
+  "topk": 64,
+  "max_answer_tokens": 10,
+  "max_seq_len": 256,
+  "base_model": "Qwen/Qwen3.5-2B",
+  "revision": "15852e8c16360a2fea060d615a32b45270f8a8fc",
+  "adapter_dir": "/workspace/spell-corrector/artifacts/spell_slm_m6/qwen35_2b_direct_qlora",
+  "quantization": "nf4 double-quant, bf16 compute",
+  "attn_implementation": "flash_attention_2",
+  "tokenizer_fingerprint": "dd660f5275b69cc4",
+  "teacher_forced_token_agreement": 0.9487307117969139,
+  "teacher_forced_exact_rows": 0.8844065528882804,
+  "wall_seconds": 811.748334646225,
+  "train_jsonl": "/workspace/spell-corrector/data/distill/train.jsonl"
+}

@@ -1,0 +1,9 @@
+{
+  "file": "/tmp/m7/qwen35_0_8b_distill_q4-Q4_K_M.gguf",
+  "architecture": "qwen35",
+  "tensor_blocks": 24,
+  "declared_block_count": 25,
+  "recurrent_layers_len": 25,
+  "has_nextn_predict_layers": true,
+  "consistent": false
+}

@@ -1,5 +1,7 @@
 {
   "framework": null,
+  "buildCommand": "node scripts/check_model_asset.mjs",
+  "outputDirectory": "public",
   "functions": {
     "api/correct.js": {
       "memory": 2048,

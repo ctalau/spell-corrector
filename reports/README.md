@@ -2,7 +2,8 @@
 
 Everything this repository has tried, what it measured, and what is queued next.
 Start here; the root [README](../README.md) covers installation and how to run
-things.
+things. For the narrative version -- why each experiment followed the last, and
+what the whole arc adds up to -- read [WHAT_WE_TRIED.md](WHAT_WE_TRIED.md).
 
 > **BEA-60K is a locked benchmark.** Never train, validate, tune or prompt-search
 > on it. It is downloaded by `scripts/download_bea60k.py`, never committed. Every
@@ -65,9 +66,15 @@ magnitude — the `n` column is the first thing to read, not the last.
 | gemma-4-E2B-it-qat-**q4_0** | open, llama.cpp CPU | 100 | 87.0% | 92.8% | 59.0% | 960ms | [exp 6](experiments/06-llm-judge-cpu-llamacpp/README.md) |
 | gemma-4-E2B-it-qat-**q4_0** | sentence rewrite, llama.cpp CPU | 100 | 66.0% strict / 86.0% ignoring punctuation | 74.7% strict | 59.0% | 2,118ms | [exp 6](experiments/06-llm-judge-cpu-llamacpp/README.md) |
 | gemma-4-E2B q4_0 + DSPy | GPU, llama.cpp | — | *running* | *running* | — | *running* | [exp 7](experiments/07-gemma4-gpu-dspy/README.md) |
+| kev-0.5b | choice over Hunspell top-8, fp32 CPU | 100&#42;&#42;&#42; | 50.0% | 59.5% | 60.0% | 252ms | [exp 9](experiments/09-kev-choice/README.md) |
+| kev-0.6b | choice over Hunspell top-8, fp32 CPU | 100&#42;&#42;&#42; | 58.0% | 69.0% | 60.0% | 320ms | [exp 9](experiments/09-kev-choice/README.md) |
+| **kev-4b** | choice over Hunspell top-8, bf16 CPU | 100&#42;&#42;&#42; | **79.0%** | **94.0%** | 60.0% | 5,623ms | [exp 9](experiments/09-kev-choice/README.md) |
 
 &#42; A same-box rerun of index mode measured 783ms p50; the 632ms figure is from
 the earlier session. Both reproduced 83.0% / 100% exactly.
+&#42;&#42;&#42; The kev rows use the **frozen 100** of milestones 3-7, not the exp 5/6
+seed-1337 sample; Hunspell top-1 is 60.0% on it and 59.0% on theirs, so the two
+blocks of rows are near-identical but not the same denominators.
 &#42;&#42; The bf16 open-mode run hit a disk-I/O stall (median 10.2s, confirmed at
 ~5-6MB/s via `/proc/<pid>/io`), so no honest latency or speedup ratio can be
 quoted from it.
@@ -105,6 +112,8 @@ q4_0-vs-bf16 gap (2-3 points) is inside that noise in *magnitude* even though it
 | 5 | LLM judge, index mode | completed on CPU; **GPU pods never ran** | gemma-4-E2B-it 83.0% (n=100) / 78.8% (n=486) | [05-llm-judge-index](experiments/05-llm-judge-index/README.md) |
 | 6 | LLM judge on CPU: 4 answer modes, q4_0 + llama.cpp | completed | **90.0% (n=100)** open mode — the best number in the repo | [06-llm-judge-cpu-llamacpp](experiments/06-llm-judge-cpu-llamacpp/README.md) |
 | 7 | gemma-4-E2B q4_0 on GPU via llama.cpp + DSPy prompt optimization | **running** | pending | [07-gemma4-gpu-dspy](experiments/07-gemma4-gpu-dspy/README.md) |
+| 8 | Distilling the 2B Q4 corrector into an 0.8B Q4 student | completed, target missed | Student **87.30%** (n=2,000) vs teacher 88.75%; $0.70 | [08-distill-2b-to-08b](experiments/08-distill-2b-to-08b/README.md) |
+| 9 | Open-weights **kev** in the seat "Jev Choice" occupied | completed | `kev-4b` **79.0% overall / 94.0% conditional**; the two sub-1B checkpoints score *below* Hunspell top-1 | [09-kev-choice](experiments/09-kev-choice/README.md) |
 
 Each experiment directory holds its own front-matter block (status, date/commit,
 headline, cost, what it settled, what it left open), the write-up, and the plan

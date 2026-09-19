@@ -1,0 +1,20 @@
+{
+  "run": "jaredpalmer/kev-4b",
+  "device": "cpu",
+  "dtype": "bf16",
+  "instructions": "The word <TYPO>{typo}</TYPO> in the text is misspelled. Which option is the word the writer meant?",
+  "limit_candidates": 8,
+  "n": 100,
+  "overall_accuracy": 0.79,
+  "coverage_gold_in_list": 0.84,
+  "conditional_accuracy": 0.9404761904761905,
+  "hunspell_top1_accuracy": 0.6,
+  "mean_candidates": 4.32,
+  "truncated_records": 0,
+  "load_seconds": 2.737933818999977,
+  "latency_ms": {
+    "p50": 5622.866205000037,
+    "p90": 6933.864454999934,
+    "mean": 5813.199498329994
+  }
+}

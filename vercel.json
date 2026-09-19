@@ -1,0 +1,9 @@
+{
+  "functions": {
+    "api/correct.js": {
+      "memory": 2048,
+      "maxDuration": 60,
+      "includeFiles": "artifacts/spell_slm_m7_q4/*"
+    }
+  }
+}

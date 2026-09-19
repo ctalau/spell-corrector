@@ -46,6 +46,10 @@ tmp/
 # OS
 .DS_Store
 
+# Node / Vercel (web/ serving layer)
+node_modules/
+.vercel/
+
 # Mid-run student checkpoints pulled off the pod; the kept ones are committed
 # explicitly under artifacts/spell_slm_m7/.
 artifacts/distill_checkpoints/

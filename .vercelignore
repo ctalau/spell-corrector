@@ -1,0 +1,47 @@
+# This is a Python research repo; the Vercel deployment only needs the web
+# serving layer (api/, public/, package.json) plus one model artifact
+# (referenced explicitly via vercel.json's `includeFiles`). Everything else
+# below is excluded so the upload stays small and fast.
+
+# Other experiment artifacts / checkpoints -- not served.
+artifacts/spell_slm_m3/
+artifacts/spell_slm_m4/
+artifacts/spell_slm_m4_q4/
+artifacts/spell_slm_m5/
+artifacts/spell_slm_m6/
+artifacts/spell_slm_m6_q4/
+artifacts/spell_slm_m7/
+artifacts/model/
+artifacts/distill_checkpoints/
+artifacts/frozen_cache/
+
+# Non-served files inside the one artifact dir the function does use
+# (only the .gguf and the prompt template, pulled in via includeFiles, are
+# needed at runtime).
+artifacts/spell_slm_m7_q4/predictions_*.jsonl
+artifacts/spell_slm_m7_q4/metrics_*.json
+artifacts/spell_slm_m7_q4/gguf_metadata*.json
+artifacts/spell_slm_m7_q4/README.md
+
+# Training data, reports, Python source, configs -- not part of the serving
+# layer.
+data/
+reports/
+scripts/
+spelling_reranker/
+tests/
+configs/
+pyproject.toml
+requirements.lock
+
+# Python / editor / OS cruft
+__pycache__/
+*.pyc
+.venv/
+venv/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.idea/
+.vscode/
+.DS_Store

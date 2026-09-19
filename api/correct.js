@@ -14,7 +14,7 @@
 // (86.0% -> 80.7% casefold on a 300-example slice of the recorded test set)
 // versus the llama-server reference the M7 README's numbers came from.
 import { getLlama, LlamaCompletion, LlamaText, SpecialTokensText } from "node-llama-cpp";
-import { readFileSync } from "node:fs";
+import { closeSync, openSync, readFileSync, readSync } from "node:fs";
 import os from "node:os";
 import path from "node:path";
 
@@ -34,10 +34,40 @@ const THREADS = Math.max(1, Math.min(4, os.cpus().length));
 // container, so the ~500MB model is loaded once per cold start, not once
 // per request.
 let modelState;
+
+// The model is tracked by Git LFS. A host that clones without LFS ships the
+// ~130-byte pointer file, whose first four bytes are `vers` -- node-llama-cpp
+// then reports `Invalid GGUF magic. Expected "GGUF" but got "vers".`, which
+// says nothing about what to fix. Check the magic ourselves and say it.
+function assertRealModelFile() {
+  let fd;
+  try {
+    fd = openSync(MODEL_PATH, "r");
+  } catch {
+    throw new Error(`model file missing at ${MODEL_PATH}`);
+  }
+  const head = Buffer.alloc(4);
+  try {
+    readSync(fd, head, 0, 4, 0);
+  } finally {
+    closeSync(fd);
+  }
+  const magic = head.toString("latin1");
+  if (magic === "GGUF") return;
+  if (magic === "vers") {
+    throw new Error(
+      "the deployed .gguf is a Git LFS pointer, not the model: enable Git LFS " +
+        "for this project (Settings -> Git -> Git LFS) and redeploy"
+    );
+  }
+  throw new Error(`unexpected magic ${JSON.stringify(magic)} in ${MODEL_PATH}, expected "GGUF"`);
+}
+
 async function getModelState() {
   if (modelState == null) {
     modelState = (async () => {
       const t0 = Date.now();
+      assertRealModelFile();
       const llama = await getLlama({ gpu: false });
       const model = await llama.loadModel({ modelPath: MODEL_PATH });
       const context = await model.createContext({ contextSize: CONTEXT_SIZE, threads: THREADS });
@@ -109,6 +139,9 @@ export default async function handler(req, res) {
       cold_start_load_ms: loadMs,
     });
   } catch (err) {
+    // A failed load poisons the singleton for the life of the container;
+    // clear it so the next request retries instead of replaying the error.
+    modelState = undefined;
     res.status(500).json({ error: String(err?.message ?? err) });
   }
 }

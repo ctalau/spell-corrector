@@ -1,0 +1,45 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Spell corrector (M7 Q4_K_M)</title>
+<style>
+  body { font-family: system-ui, sans-serif; max-width: 640px; margin: 3rem auto; padding: 0 1rem; color: #1a1a1a; }
+  textarea { width: 100%; min-height: 5rem; font-size: 1rem; padding: 0.5rem; box-sizing: border-box; }
+  button { margin-top: 0.75rem; padding: 0.5rem 1.25rem; font-size: 1rem; cursor: pointer; }
+  #result { margin-top: 1.5rem; padding: 1rem; background: #f5f5f5; border-radius: 6px; white-space: pre-wrap; font-family: ui-monospace, monospace; font-size: 0.9rem; }
+  p.hint { color: #666; font-size: 0.9rem; }
+</style>
+</head>
+<body>
+<h1>Spell corrector — M7 Q4_K_M</h1>
+<p class="hint">
+  Wrap exactly one misspelled word in <code>&lt;TYPO&gt;...&lt;/TYPO&gt;</code>.
+</p>
+<textarea id="sentence">I &lt;TYPO&gt;discoverd&lt;/TYPO&gt; the name of my illness .</textarea>
+<button id="go">Correct</button>
+<div id="result"></div>
+<script>
+  const btn = document.getElementById("go");
+  const out = document.getElementById("result");
+  btn.addEventListener("click", async () => {
+    out.textContent = "Running (first request after a cold start can take several seconds while the model loads)...";
+    btn.disabled = true;
+    try {
+      const res = await fetch("/api/correct", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ sentence: document.getElementById("sentence").value }),
+      });
+      const data = await res.json();
+      out.textContent = JSON.stringify(data, null, 2);
+    } catch (err) {
+      out.textContent = "Error: " + err;
+    } finally {
+      btn.disabled = false;
+    }
+  });
+</script>
+</body>
+</html>

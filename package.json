@@ -1,0 +1,13 @@
+{
+  "name": "spell-corrector-web",
+  "private": true,
+  "version": "1.0.0",
+  "description": "Vercel serving layer for the M7 Q4_K_M distilled spelling corrector",
+  "type": "module",
+  "engines": {
+    "node": ">=20"
+  },
+  "dependencies": {
+    "node-llama-cpp": "^3.21.1"
+  }
+}

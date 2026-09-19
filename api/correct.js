@@ -14,20 +14,15 @@
 // (86.0% -> 80.7% casefold on a 300-example slice of the recorded test set)
 // versus the llama-server reference the M7 README's numbers came from.
 import { getLlama, LlamaCompletion, LlamaText, SpecialTokensText } from "node-llama-cpp";
-import { readFileSync } from "node:fs";
 import os from "node:os";
 import path from "node:path";
+import { buildUserPrompt, MAX_ANSWER_TOKENS, normalizeCorrection, validateSentence } from "./lib/spelling.js";
 
 const MODEL_PATH = path.join(
   process.cwd(),
   "artifacts/spell_slm_m7_q4/qwen35_0_8b_distill_q4-Q4_K_M.gguf"
 );
-const PROMPT_TEMPLATE = readFileSync(
-  path.join(process.cwd(), "artifacts/spell_slm_m7_q4/direct_correct_v1.txt"),
-  "utf-8"
-);
 const CONTEXT_SIZE = 1024;
-const MAX_ANSWER_TOKENS = 5;
 const THREADS = Math.max(1, Math.min(4, os.cpus().length));
 
 // Module-level singleton: persists across warm invocations of the same
@@ -50,7 +45,7 @@ async function getModelState() {
 }
 
 function buildPrompt(sentenceWithTypo) {
-  const userText = PROMPT_TEMPLATE.replace("{{SENTENCE}}", sentenceWithTypo);
+  const userText = buildUserPrompt(sentenceWithTypo);
   return LlamaText([
     new SpecialTokensText("<|im_start|>user\n"),
     userText,
@@ -62,14 +57,6 @@ function buildPrompt(sentenceWithTypo) {
     // <think> block and every answer comes back empty.
     new SpecialTokensText("<|im_end|>\n<|im_start|>assistant\n<think>\n\n</think>\n\n"),
   ]);
-}
-
-function normalize(text) {
-  let out = (text || "").trim();
-  out = out.split(/\r?\n/)[0].trim();
-  out = out.replace(/^["']+|["']+$/g, "").trim();
-  out = out.split(/\s+/)[0] ?? "";
-  return out.replace(/^["']+|["']+$/g, "").replace(/[.,;:!?]+$/g, "");
 }
 
 export const config = { maxDuration: 60 };
@@ -89,8 +76,9 @@ export default async function handler(req, res) {
   }
 
   const sentence = req.body?.sentence;
-  if (typeof sentence !== "string" || !sentence.includes("<TYPO>") || !sentence.includes("</TYPO>")) {
-    res.status(400).json({ error: 'body must be {"sentence": "..."} with exactly one <TYPO>word</TYPO> span' });
+  const invalid = validateSentence(sentence);
+  if (invalid) {
+    res.status(400).json({ error: invalid });
     return;
   }
 
@@ -103,7 +91,7 @@ export default async function handler(req, res) {
       repeatPenalty: false,
     });
     res.status(200).json({
-      correction: normalize(raw),
+      correction: normalizeCorrection(raw),
       raw,
       latency_ms: Date.now() - t0,
       cold_start_load_ms: loadMs,

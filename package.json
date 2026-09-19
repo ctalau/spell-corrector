@@ -7,6 +7,9 @@
   "engines": {
     "node": ">=20"
   },
+  "scripts": {
+    "test:web": "node --test tests/test_api_spelling.mjs"
+  },
   "dependencies": {
     "node-llama-cpp": "^3.21.1"
   }

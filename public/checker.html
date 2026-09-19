@@ -86,6 +86,14 @@
     font-size: 0.8rem;
     cursor: pointer;
   }
+  fieldset.backend {
+    border: 1px solid #ddd;
+    border-radius: 6px;
+    padding: 0.6rem 0.85rem 0.75rem;
+    margin: 1rem 0;
+  }
+  fieldset.backend legend { font-size: 0.9rem; color: #666; padding: 0 0.25rem; }
+  fieldset.backend label { margin-right: 1.1rem; cursor: pointer; }
 </style>
 </head>
 <body>
@@ -94,7 +102,17 @@
   Misspelled words are underlined by a client-side dictionary
   (<a href="https://github.com/cfinke/Typo.js" target="_blank" rel="noopener">Typo.js</a>,
   loaded from a CDN). Click an underlined word to fetch the correction from the
-  fine-tuned model.
+  selected backend.
+</p>
+<fieldset class="backend">
+  <legend>Backend</legend>
+  <label><input type="radio" name="backend" value="local" checked> Local (Vercel GGUF)</label>
+  <label><input type="radio" name="backend" value="runpod"> RunPod GPU</label>
+</fieldset>
+<p class="hint">
+  Local runs the Q4_K_M GGUF on Vercel. RunPod proxies to the GPU Serverless
+  endpoint (the API key stays on the server). After idle, a GPU worker can take
+  several minutes to boot; if the request times out, wait and retry.
 </p>
 
 <div id="status">Loading dictionary&hellip;</div>
@@ -107,7 +125,9 @@
 <p><a href="/index.html">&larr; back to the raw correction form</a></p>
 
 <script src="https://cdn.jsdelivr.net/npm/typo-js@1.2.1/typo.js"></script>
+<script src="/backend.js"></script>
 <script>
+  SpellBackend.initBackendSelector();
   const DICT_BASE = "https://cdn.jsdelivr.net/npm/typo-js@1.2.1/dictionaries/en_US";
   const input = document.getElementById("input");
   const highlights = document.getElementById("highlights");
@@ -206,16 +226,12 @@
   }
 
   async function fetchCorrection(sentenceWithTypo) {
-    const res = await fetch("/api/correct", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ sentence: sentenceWithTypo }),
-    });
-    if (!res.ok) {
-      const body = await res.json().catch(() => ({}));
-      throw new Error(body.error || `HTTP ${res.status}`);
+    status.textContent = SpellBackend.runningStatus();
+    try {
+      return await SpellBackend.postCorrection(sentenceWithTypo);
+    } finally {
+      status.textContent = "Dictionary loaded. Type below, or edit the sample text.";
     }
-    return res.json();
   }
 
   highlights.addEventListener("click", async (ev) => {

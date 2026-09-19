@@ -211,6 +211,35 @@ python scripts/benchmark_bea60k.py --model artifacts/model --output reports/bea6
 See [scripts/runpod/README.md](scripts/runpod/README.md). Pods bill for as long
 as they exist — always finish with `scripts/runpod/terminate.py --all`.
 
+## Web demo (Vercel)
+
+`public/` and `api/` deploy as a static + serverless app. Both
+[`public/index.html`](public/index.html) and
+[`public/checker.html`](public/checker.html) let you pick a backend:
+
+| Choice | Route | What it runs |
+|---|---|---|
+| **Local (Vercel GGUF)** | `POST /api/correct` | M7 Q4_K_M via `node-llama-cpp` on Vercel |
+| **RunPod GPU** | `POST /api/correct-runpod` | Server-side proxy to RunPod Serverless Flex (`worker-vllm`, `ctalau/qwen35-08b-spell-m7-distill`) |
+
+The browser never talks to RunPod directly. Set these on the Vercel project
+(Settings → Environment Variables) — do **not** put them in client JS or commit
+them:
+
+| Variable | Required | Default |
+|---|---|---|
+| `RUNPOD_API_KEY` | yes, for the RunPod path | — |
+| `RUNPOD_ENDPOINT_ID` | no | `835g1wte9tgcor` |
+
+Without `RUNPOD_API_KEY`, Local still works; the RunPod option returns HTTP 503
+with a clear error. The proxy uses greedy OpenAI-style chat
+(`chat_template_kwargs.enable_thinking = false`, `max_tokens = 5`) and the same
+`direct_correct_v1.txt` prompt as Local. GPU workers scale to zero; a true
+cold start (image pull + vLLM compile) can take several minutes. The proxy
+waits about 55s (`maxDuration: 60`) and returns HTTP 504 with a retry message
+if the worker is still booting. Once warm, a correction is typically
+sub-second.
+
 ## Design constraints
 
 - Byte vocabulary 0..255 plus 24 specials (280 total). No BPE/SPM.

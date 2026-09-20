@@ -3,7 +3,7 @@
 Everything this repository has tried, what it measured, and what is queued next.
 Start here; the root [README](../README.md) covers installation and how to run
 things. For the narrative version -- why each experiment followed the last, and
-what the whole arc adds up to -- read [WHAT_WE_TRIED.md](WHAT_WE_TRIED.md).
+what the whole arc adds up to -- read [WORKLOG.md](WORKLOG.md).
 
 > **BEA-60K is a locked benchmark.** Never train, validate, tune or prompt-search
 > on it. It is downloaded by `scripts/download_bea60k.py`, never committed. Every

@@ -1,63 +1,121 @@
 # Spell Corrector
 
-Byte-level **contextual spelling reranker**. Hunspell proposes candidates; a
-bidirectional Transformer picks exactly one.
+Can a small model correct spelling well enough to be useful, and cheaply enough
+to run on a CPU? This repository is nine experiments answering that, ending in a
+deployed **0.8B-parameter corrector, quantized to Q4_K_M (505 MiB), that gets
+~87% of BEA-60K word errors right at a p50 of ~0.6s on 4 vCPUs**.
 
-This repository is the experiment line from the original charter, now at
-[reports/experiments/01-byte-reranker-28m/PLAN.md](reports/experiments/01-byte-reranker-28m/PLAN.md):
+Total GPU spend for the whole project: about **$10**.
 
-> Beat Aspell's top-1 spelling correction accuracy on BEA-60K.
+> **Status: proof of concept, done on purpose.** The line of experiments reached
+> a working answer and stopped. Nothing here is a product, and the headline
+> accuracy numbers below are small-sample — see [Health warnings](#health-warnings).
 
-The model is **not** generative. Training labels are Hunspell ranks on synthetic
-typos over WikiText-103. BEA-60K is a locked final benchmark and is never used
-for training, validation, or hyperparameter selection.
-
-## Start here: the experiment log
-
-**[reports/README.md](reports/README.md)** is the index of everything that has
-been tried — seven experiments, every measured number against BEA-60K in one
-table with its sample size, what has been ruled out, and what is queued. Read it
-before proposing anything.
-
-The short version, as of 2026-09-11:
+## Read these two first
 
 | | |
 |---|---|
-| Best system measured on the **full** benchmark | the trained 87M byte-level reranker — **64.82%** overall, n=68,429 (Aspell 60.56%, Hunspell top-1 53.67%) |
-| Best system measured **at all** | `google/gemma-4-E2B-it` prompted zero-shot in open mode — **90.0%** overall, but **n=100** on a CPU box, so ±8-10 pp |
-| In flight | gemma-4-E2B q4_0 on GPU via llama.cpp + DSPy prompt optimization |
+| **[reports/WORKLOG.md](reports/WORKLOG.md)** | The whole arc: every experiment, what worked (Part I), what failed and why (Part II), what it cost, and what it all adds up to. If you read one file, read this one. |
+| **[reports/TAKEAWAY.md](reports/TAKEAWAY.md)** | The conclusions worth carrying to the next project — on training small models, distillation, tooling, and what serving actually costs. Personal notes, written in Romanian. |
 
-## Where the accuracy comes from
+[reports/README.md](reports/README.md) is the reference index behind them: every
+measured number in one table with its sample size, plus what has been ruled out.
+Per-experiment write-ups live in [reports/experiments/](reports/experiments/).
 
-Experiment 1 reached **62.56%** overall (vs Aspell 60.55%); experiment 2 scaled
-it to **64.82%** (conditional 80.14%), short of its 75% target. Decomposed, for
-experiment 1:
+## Where it landed
 
+Two things ended up mattering, and they point the same way.
+
+**1. A candidate list is a liability, not an asset.** The project started as a
+*reranker*: Hunspell proposes words, a trained model picks one. That approach is
+capped at ~81% overall, because Hunspell's list simply does not contain the right
+word for ~19% of BEA-60K errors. Three independent systems hit that wall. Dropping
+candidates entirely and having the model emit the correction directly cost **one
+point of accuracy and bought a 53x latency win**.
+
+**2. Distillation beats direct training at this size.** A 2B teacher distilled
+into an 0.8B student loses 1.45 points and serves sub-second on CPU — better than
+training the 0.8B on examples directly.
+
+| System | n | Acc@1 | Latency (p50) | Where |
+|---|---:|---:|---:|---|
+| Hunspell top-1 (do-nothing baseline) | 68,429 | 53.67% | — | [worklog §1](reports/WORKLOG.md) |
+| Aspell top-1 (the baseline to beat) | 68,429 | 60.56% | — | [worklog §1](reports/WORKLOG.md) |
+| 87M byte reranker, trained from scratch | 68,429 | 64.82% | — | [exp 2](reports/experiments/02-byte-reranker-87m/README.md) |
+| gemma-4-E2B-it, zero-shot, answering freely | 100 | 90.0% | 960ms (q4_0) | [exp 6](reports/experiments/06-llm-judge-cpu-llamacpp/README.md) |
+| Qwen3.5-2B QLoRA direct corrector (teacher) | 2,000 | 88.75% | 0.318s (3090) | [worklog §6](reports/WORKLOG.md) |
+| **Qwen3.5-0.8B distilled student, Q4_K_M, CPU** | **2,000** | **86.60%** | **0.597s** | [exp 8](reports/experiments/08-distill-2b-to-08b/README.md) |
+
+The last row is the artifact that got deployed.
+
+### Health warnings
+
+- **Only three rows above use the full 68,429-error benchmark.** Everything else
+  is n=100-2,000. A 100-row proportion near 88% carries roughly ±6 pp; the
+  gemma row's ±8-10 pp is wide enough to swallow most of its lead.
+- **The two best numbers were never scored against each other at scale.** No
+  fine-tuned model has been run on all of BEA-60K.
+- **BEA-60K itself is imperfect** — some "errors" are real-word substitutions,
+  some gold corrections are wrong. It was chosen for being easy to use.
+
+## Try it
+
+`public/` + `api/` deploy to Vercel as a static page plus two serverless routes.
+[`public/index.html`](public/index.html) corrects one word in context;
+[`public/checker.html`](public/checker.html) highlights a whole document. Both
+let you pick a backend:
+
+| Choice | Route | What it runs |
+|---|---|---|
+| **Local (Vercel GGUF)** | `POST /api/correct` | The distilled 0.8B Q4_K_M student via `node-llama-cpp`, in the Lambda |
+| **RunPod GPU** | `POST /api/correct-runpod` | Server-side proxy to RunPod Serverless Flex (`ctalau/qwen35-08b-spell-m7-distill` on `worker-vllm`) |
+
+The browser never talks to RunPod directly. Set these on the Vercel project
+(Settings → Environment Variables) — never in client JS, never committed:
+
+| Variable | Required | Default |
+|---|---|---|
+| `RUNPOD_API_KEY` | yes, for the RunPod path | — |
+| `RUNPOD_ENDPOINT_ID` | no | `835g1wte9tgcor` |
+
+Without `RUNPOD_API_KEY` the Local path still works and the RunPod option returns
+a 503 with a clear error. Both paths use greedy decoding and the same
+`direct_correct_v1.txt` prompt. GPU workers scale to zero, so a true cold start
+(image pull + vLLM compile) takes minutes; the proxy waits ~55s and returns 504
+with a retry message. Once warm, a correction is sub-second.
+
+```bash
+npm install
+npm run test:web          # node --test tests/test_api_spelling.mjs
 ```
-overall = P(gold in Hunspell pool) x P(model picks gold | it is there)
-62.56%  =        80.38%            x            77.84%
-```
 
-Hunspell is fixed as the only candidate source, so the first factor is a hard
-ceiling around 81%. Everything in experiment 2 targeted the second factor:
+## Repo map
 
-| Change | Why |
+| Path | What's in it |
 |---|---|
-| Typo generator rewritten | Experiment 1 generated **only** edit-distance-1 typos. Authentic misspellings are ~73% ED1 / ~25% ED2 / ~2% ED3+, and Hunspell's top-1 collapses as edit distance grows — the ED>=2 quarter is exactly where a reranker earns its keep, and the model had never seen it. |
-| Phonetic/orthographic corruptions | Real errors are how a writer *thinks* a word is spelled (doubling, silent letters, reduced vowels, suffix confusion), not uniform keyboard noise. |
-| Noisy context augmentation | A corrector reads uncorrected text, so neighbouring words are often misspelled too. Training on clean context taught the model to over-trust it. |
-| Gold-index balancing | Hunspell already ranks the answer first for ~81% of synthetic typos. Those examples only teach the model to agree with Hunspell. |
-| 16 candidate slots | Hunspell's suggestion list is no longer truncated at 10. |
-| ~17x more training data | Made affordable by the data-pipeline rewrite below. |
-| 87M parameters | Modelling English context is the binding constraint once the candidate list is fixed. |
-| Richer scoring head | Adds `cand*typo` and `abs(cand-typo)` interaction features. |
+| `reports/` | **The substance.** Worklog, takeaways, the experiment index, and one directory per experiment with its plan, write-up and raw results. |
+| `artifacts/` | Trained checkpoints and their metrics. `spell_slm_m7_q4/` is the deployed 0.8B Q4_K_M student; `model/` is the 87M byte reranker. |
+| `scripts/` | Data building, training, benchmarking. `distill/` is the teacher→student pipeline, `runpod/` the GPU pod helpers, `kev/` the chooser harness. |
+| `spelling_reranker/` | The byte-level reranker package (experiments 1-2). |
+| `api/`, `public/` | The Vercel demo. |
+| `configs/` | Training configs for the reranker and the frozen-encoder pilot. |
+| `tests/` | CPU tests, including the one that fails the build on benchmark leakage. |
 
-Calibration of the typo generator uses Wikipedia's public
-[common misspellings list](https://en.wikipedia.org/wiki/Wikipedia:Lists_of_common_misspellings),
-never the benchmark — see `scripts/calibrate_typo_model.py` and
-`reports/typo_calibration.json`.
+## Ground rules
 
-## Install
+- **BEA-60K is a locked benchmark.** Never train, validate, tune or prompt-search
+  on it; never commit BEA files. `tests/test_dataset.py` fails the build if a
+  training-construction file so much as mentions it. The one documented exception
+  is experiment 8's held-out, sentence-disjoint distillation split —
+  see [its plan](reports/experiments/08-distill-2b-to-08b/PLAN.md).
+- **Aspell's suggestions stay out of the candidate pool.** Adding them would lift
+  the reranking ceiling from ~81% to 87.7%, which is why it is tempting; it is
+  out of scope by explicit decision. Do not quietly reintroduce it to hit a number.
+- **Runpod pods bill for as long as they exist.** Always finish a GPU run with
+  `python scripts/runpod/terminate.py --all`.
+- Seed **1337** everywhere, for data and training.
+
+## Install (Python side)
 
 System packages (Debian/Ubuntu):
 
@@ -86,165 +144,58 @@ pip install --no-build-isolation hunspell==0.5.5
 ```
 
 On Python 3.12 that workaround does not apply — there is no `distutils` for old
-setuptools to patch — so use the distro package, which is the same version
+setuptools to patch — so install the distro package, which is the same version
 already compiled for the interpreter:
 
 ```bash
 sudo apt-get install -y python3-hunspell
 ```
 
-Confirm Hunspell:
+Check it, then run the tests:
 
 ```bash
 echo teh | hunspell -d en_US -a
-```
-
-## Tests (CPU)
-
-```bash
 python -m pytest tests/ -q
 ```
 
-| Test | File |
-|------|------|
-| Byte roundtrip, vocab contiguity | `tests/test_byte_encoding.py` |
-| Serialization spans, padding | `tests/test_serialization.py` |
-| Gold label, determinism, context noise, no benchmark leak | `tests/test_dataset.py` |
-| Typo realism vs the public misspelling list | `tests/test_typo_gen.py` |
-| Shapes, param counts, pooling equivalence, loss | `tests/test_model.py` |
-| Tiny overfit | `tests/test_tiny_overfit.py` |
-| Frozen encoder selector | `tests/test_frozen_encoder.py` |
+## Reproduce the experiments
 
-`tests/test_dataset.py` fails the build if any training-construction file so
-much as mentions the locked benchmark.
-
-## Build training data
-
-Synthetic only (WikiText-103 raw, CC BY-SA). See [data/README.md](data/README.md).
+Each experiment directory has its own commands and front matter. The common
+entry points:
 
 ```bash
-python scripts/download_sources.py
-python scripts/build_training_data.py --target-train 4000000 --target-valid 60000
-```
-
-Three passes: count the vocabulary, build a `word -> typos -> Hunspell pool`
-table, then instantiate examples by dropping precomputed typos into sentences.
-Hunspell is called once per **unique typo** rather than once per example, so
-build cost no longer scales with dataset size.
-
-Outputs: `data/processed/{train,validation}.parquet`, `data_stats.json`,
-`manifest.json`, `artifacts/hunspell_metadata.json`.
-
-## Train
-
-```bash
-python scripts/train.py --config configs/train_sanity.yaml   # cheap sanity
-python scripts/train.py --config configs/train_full.yaml     # full experiment
-```
-
-On OOM, lower `microbatch` and raise `grad_accumulation` in
-`configs/train_full.yaml` so the effective batch stays 512.
-
-Checkpoints land in `artifacts/model/`.
-
-## Frozen ModernBERT selector
-
-Pilot from [reports/experiments/04-frozen-encoder/PLAN.md](reports/experiments/04-frozen-encoder/PLAN.md)
-(**aborted mid-run** — see its front matter before relying on anything here): freeze
-`answerdotai/ModernBERT-base` (Hugging Face revision
-`8949b909ec900327062f0ebf497f51aef5e6f0c8`, resolved 2026-09-09) and train only
-a small selector. Launch on Runpod with:
-
-```bash
-python scripts/runpod/launch.py \
-  --experiment frozen \
-  --config configs/train_frozen_modernbert.yaml
-```
-
-That defaults to the cu124 / Python 3.11 image (`runpod/pytorch:2.4.0-py3.11-cuda12.4.1-devel-ubuntu22.04`) so Hunspell and `transformers>=4.48,<5` both work. Do not use the cu128 / py3.12 torch 2.8 image until Hunspell is fixed for 3.12. See [reports/experiments/04-frozen-encoder/README.md](reports/experiments/04-frozen-encoder/README.md).
-
-Local GPU path (after synthetic parquet exists):
-
-```bash
-python scripts/cache_frozen_features.py --config configs/train_frozen_modernbert.yaml --smoke-examples 10000
-python scripts/cache_frozen_features.py --config configs/train_frozen_modernbert.yaml --bea-limit 1000
-python scripts/train_frozen_selector.py --config configs/train_frozen_modernbert.yaml --arm scalar
-python scripts/train_frozen_selector.py --config configs/train_frozen_modernbert.yaml --arm linear
-python scripts/train_frozen_selector.py --config configs/train_frozen_modernbert.yaml --arm mlp
-python scripts/evaluate_frozen_selector.py --config configs/train_frozen_modernbert.yaml --split d-pair --checkpoint artifacts/frozen/heads/mlp
-python scripts/evaluate_frozen_selector.py --config configs/train_frozen_modernbert.yaml --split bea --bea-limit 1000 --checkpoint artifacts/frozen/heads/mlp
-```
-
-Do not train or tune on BEA-60K. The 1k subset is a monitoring gate only.
-See [reports/experiments/04-frozen-encoder/README.md](reports/experiments/04-frozen-encoder/README.md).
-
-## LLM judge (no training)
-
-A separate track prompts a small instruction-tuned LLM to correct the typo
-directly, in one of four answer modes (pick a candidate index, answer freely with
-the candidates as a hint, self-generate candidates by beam search, or rewrite the
-whole sentence). It needs no training and is currently the highest-scoring thing
-in the repo, on a small sample.
-
-```bash
-python scripts/llm_judge_bea60k_cpu.py --help    # CPU / llama.cpp track, four answer modes
-python scripts/llm_judge_bea60k.py --help        # GPU-targeted index-mode harness
-```
-
-Results and the full method:
-[experiment 5](reports/experiments/05-llm-judge-index/README.md) and
-[experiment 6](reports/experiments/06-llm-judge-cpu-llamacpp/README.md).
-
-## Benchmark BEA-60K
-
-BEA-60K is a **locked** benchmark: never train, validate, tune or prompt-search
-on it, and do **not** commit BEA files.
-
-```bash
+# Baselines and the full benchmark (CPU, free)
 python scripts/download_bea60k.py
 python scripts/benchmark_aspell.py
 python scripts/benchmark_bea60k.py --model artifacts/model --output reports/bea60k
+
+# LLM judges, no training (exp 5-6)
+python scripts/llm_judge_bea60k_cpu.py --help   # CPU / llama.cpp, four answer modes
+python scripts/llm_judge_bea60k.py --help       # GPU-targeted index mode
+
+# The byte reranker (exp 1-2)
+python scripts/download_sources.py
+python scripts/build_training_data.py --target-train 4000000 --target-valid 60000
+python scripts/train.py --config configs/train_full.yaml
+
+# Distillation, teacher -> student (exp 8)
+ls scripts/distill/     # build_data, dump_teacher_logits, train_student, eval_gguf
 ```
 
-## GPU runs
+GPU runs go through [`scripts/runpod/`](scripts/runpod/README.md).
 
-See [scripts/runpod/README.md](scripts/runpod/README.md). Pods bill for as long
-as they exist — always finish with `scripts/runpod/terminate.py --all`.
+## If you pick this up
 
-## Web demo (Vercel)
+The open threads, in the order they are worth doing:
 
-`public/` and `api/` deploy as a static + serverless app. Both
-[`public/index.html`](public/index.html) and
-[`public/checker.html`](public/checker.html) let you pick a backend:
+1. **Score the deployed student on the full 68,429 errors.** Every fine-tuned
+   number in this repo is n≤2,000; the comparison against Aspell and the 87M
+   reranker is not yet apples-to-apples.
+2. **Chase the free-answering ceiling.** gemma's 90% in open mode, zero-shot and
+   untrained, is still the highest number measured here.
+3. **Revisit the serving stack.** The same weights scored differently under
+   different runtimes — see [TAKEAWAY.md](reports/TAKEAWAY.md).
 
-| Choice | Route | What it runs |
-|---|---|---|
-| **Local (Vercel GGUF)** | `POST /api/correct` | M7 Q4_K_M via `node-llama-cpp` on Vercel |
-| **RunPod GPU** | `POST /api/correct-runpod` | Server-side proxy to RunPod Serverless Flex (`worker-vllm`, `ctalau/qwen35-08b-spell-m7-distill`) |
-
-The browser never talks to RunPod directly. Set these on the Vercel project
-(Settings → Environment Variables) — do **not** put them in client JS or commit
-them:
-
-| Variable | Required | Default |
-|---|---|---|
-| `RUNPOD_API_KEY` | yes, for the RunPod path | — |
-| `RUNPOD_ENDPOINT_ID` | no | `835g1wte9tgcor` |
-
-Without `RUNPOD_API_KEY`, Local still works; the RunPod option returns HTTP 503
-with a clear error. The proxy uses greedy OpenAI-style chat
-(`chat_template_kwargs.enable_thinking = false`, `max_tokens = 5`) and the same
-`direct_correct_v1.txt` prompt as Local. GPU workers scale to zero; a true
-cold start (image pull + vLLM compile) can take several minutes. The proxy
-waits about 55s (`maxDuration: 60`) and returns HTTP 504 with a retry message
-if the worker is still booting. Once warm, a correction is typically
-sub-second.
-
-## Design constraints
-
-- Byte vocabulary 0..255 plus 24 specials (280 total). No BPE/SPM.
-- One forward pass scores all candidates.
-- Hunspell suggestion order is preserved (`CAND_0`…`CAND_15`).
-- Hunspell is the only candidate generator.
-- Unicode NFC; no global lowercasing.
-- Seed **1337** for data and training.
+Experiments 3, 4 and 7 are dead — defunded, NaN'd mid-run, and abandoned in
+flight respectively. [WORKLOG Part II](reports/WORKLOG.md) says what each was
+for, so nobody repeats them by accident.

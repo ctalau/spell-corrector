@@ -7,6 +7,8 @@ deployed **0.8B-parameter corrector, quantized to Q4_K_M (505 MiB), that gets
 
 Total GPU spend for the whole project: about **$10**.
 
+A demo is available on Vercel: https://spell-corrector.ctalau.dev/ .
+
 > **Status: proof of concept, done on purpose.** The line of experiments reached
 > a working answer and stopped. Nothing here is a product, and the headline
 > accuracy numbers below are small-sample — see [Health warnings](#health-warnings).
@@ -58,7 +60,7 @@ The last row is the artifact that got deployed.
 - **BEA-60K itself is imperfect** — some "errors" are real-word substitutions,
   some gold corrections are wrong. It was chosen for being easy to use.
 
-## Try it
+## Try it locally
 
 `public/` + `api/` deploy to Vercel as a static page plus two serverless routes.
 [`public/index.html`](public/index.html) corrects one word in context;

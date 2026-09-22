@@ -1,0 +1,21 @@
+{
+  "baseline": "reports/experiments/10-08b-3090-throughput/results/predictions_m7_student_fp16_test.jsonl",
+  "candidate": "/tmp/claude-0/-home-user-spell-corrector/0fdb9e38-9385-512b-b7a6-f27daaf0f3b1/scratchpad/predictions_m7_student_w4a16_test.jsonl",
+  "field": "casefold",
+  "n": 2000,
+  "baseline_accuracy": 0.8755,
+  "candidate_accuracy": 0.864,
+  "baseline_ci95": [
+    0.8603065753320525,
+    0.8892536693499622
+  ],
+  "candidate_ci95": [
+    0.8482769918445334,
+    0.8783273465422932
+  ],
+  "prediction_agreement": 0.9495,
+  "baseline_right_candidate_wrong": 40,
+  "baseline_wrong_candidate_right": 17,
+  "net": -23,
+  "mcnemar_exact_p": 0.003201543767450382
+}

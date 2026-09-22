@@ -1,0 +1,28 @@
+{
+  "label": "m7_student_fp16_test",
+  "split": "/workspace/spell-corrector/data/distill/test.jsonl",
+  "n": 2000,
+  "acc@1_exact": 0.8665,
+  "acc@1_casefold": 0.8755,
+  "empty_predictions": 0,
+  "request_failures": 0,
+  "failure_samples": [],
+  "backend": "vLLM OpenAI server",
+  "quantization": "none (fp16)",
+  "decode": {
+    "greedy": true,
+    "temperature": 0,
+    "max_tokens": 5,
+    "enable_thinking": false
+  },
+  "concurrency": 64,
+  "server_startup_wait_s": 0.04,
+  "wall_seconds": 8.92,
+  "throughput_rps": 224.23,
+  "latency_s_under_load": {
+    "p50": 0.2785811424255371,
+    "p90": 0.3492166996002197,
+    "mean": 0.2837274699211121
+  }
+}
+

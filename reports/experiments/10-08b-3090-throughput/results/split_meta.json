@@ -1,0 +1,42 @@
+{
+  "seed": 1337,
+  "bea_dir": "/workspace/spell-corrector/data/bea60k",
+  "n_pairs": 63044,
+  "n_word_errors": 68429,
+  "prompt_sha256": "41a676ee408b1ff0",
+  "prompt_file": "/workspace/spell-corrector/artifacts/spell_slm_m6/direct_correct_v1.txt",
+  "frozen_100_source": "/workspace/spell-corrector/artifacts/spell_slm_m6/predictions_m6_qlora_2b.jsonl",
+  "gold_overrides": {
+    "36967": {
+      "bea_clean": "climbimg",
+      "used": "climbing"
+    },
+    "63161": {
+      "bea_clean": "studant",
+      "used": "student"
+    }
+  },
+  "splits": {
+    "frozen_100": {
+      "n_errors": 100,
+      "n_sentences": 100
+    },
+    "test": {
+      "n_errors": 2000,
+      "n_sentences": 1771
+    },
+    "dev": {
+      "n_errors": 1000,
+      "n_sentences": 900
+    },
+    "val": {
+      "n_errors": 1000,
+      "n_sentences": 905
+    },
+    "train": {
+      "n_errors": 64295,
+      "n_sentences": 57339
+    }
+  },
+  "leak_check": "passed: no error index or source sentence is shared by two splits"
+}

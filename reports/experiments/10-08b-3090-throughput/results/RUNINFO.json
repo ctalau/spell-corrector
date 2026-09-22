@@ -1,0 +1,12 @@
+{
+  "gpu": "NVIDIA GeForce RTX 3090",
+  "gpu_price_usd_hr": "0.22",
+  "nvidia_smi": "NVIDIA GeForce RTX 3090, 24576 MiB, 580.178.04",
+  "vllm": "0.29.0",
+  "torch": "2.13.0+cu130",
+  "commit": "2337ef81764ce165446cc8c8836fe6b548db0b1f",
+  "hf_model": "ctalau/qwen35-08b-spell-m7-distill",
+  "quant_scheme": "W4A16",
+  "quant_algorithm": "gptq"
+}
+

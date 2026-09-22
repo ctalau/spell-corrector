@@ -1,0 +1,28 @@
+{
+  "label": "m7_student_w4a16_frozen_100",
+  "split": "/workspace/spell-corrector/data/distill/frozen_100.jsonl",
+  "n": 100,
+  "acc@1_exact": 0.83,
+  "acc@1_casefold": 0.83,
+  "empty_predictions": 0,
+  "request_failures": 0,
+  "failure_samples": [],
+  "backend": "vLLM OpenAI server",
+  "quantization": "W4A16 int4 (GPTQ, g128)",
+  "decode": {
+    "greedy": true,
+    "temperature": 0,
+    "max_tokens": 5,
+    "enable_thinking": false
+  },
+  "concurrency": 64,
+  "server_startup_wait_s": 0.03,
+  "wall_seconds": 0.37,
+  "throughput_rps": 268.35,
+  "latency_s_under_load": {
+    "p50": 0.21990299224853516,
+    "p90": 0.2610158920288086,
+    "mean": 0.1989676237106323
+  }
+}
+

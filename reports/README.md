@@ -115,6 +115,7 @@ q4_0-vs-bf16 gap (2-3 points) is inside that noise in *magnitude* even though it
 | 8 | Distilling the 2B Q4 corrector into an 0.8B Q4 student | completed, target missed | Student **87.30%** (n=2,000) vs teacher 88.75%; $0.70 | [08-distill-2b-to-08b](experiments/08-distill-2b-to-08b/README.md) |
 | 9 | Open-weights **kev** in the seat "Jev Choice" occupied | completed | `kev-4b` **79.0% overall / 94.0% conditional**; the two sub-1B checkpoints score *below* Hunspell top-1 | [09-kev-choice](experiments/09-kev-choice/README.md) |
 | 10 | Serving throughput of the quantized 0.8B on one RTX 3090, and what the quantization costs | completed | **420 corrections/s** at p50 0.304 s, $0.000145/1,000, at **87.40%** on the held-out test split (n=2,000). W8A8 int8 is 27% faster than fp16 and 0.15 pp behind it (p=0.63); W4A16 int4 is no faster and 1.15 pp behind (p=0.003) | [10-08b-3090-throughput](experiments/10-08b-3090-throughput/README.md) |
+| 11 | kev-4b as a judge for missing `<uicontrol>` / `<filepath>` / `<codeph>` in the Oxygen user guide (not spelling) | completed | **5,403 flags**, 74% right on a blind hand-labelled sample (n=200); recovers 60% / 91% / 64% of existing uicontrol / filepath / codeph shown as plain text | [11-kev-unmarked-markup](experiments/11-kev-unmarked-markup/README.md) |
 
 Each experiment directory holds its own front-matter block (status, date/commit,
 headline, cost, what it settled, what it left open), the write-up, and the plan

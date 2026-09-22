@@ -7,6 +7,8 @@
 Two decision rules are scored:
   choice     kev's 4-way choice (uicontrol / filepath / codeph / plain); flag when the argmax is not plain.
   noul@t     three yes/no questions; flag the element with the highest p(yes) when it is >= t.
+  combined@t the choice, except a span becomes uicontrol when its uicontrol p(yes) is >= t and the highest of the
+             three yes/no answers (the choice calls 2 in 3 real UI labels plain).
   hybrid@t   the element comes from the choice (best of the three markup options, ignoring plain); flag it when its
              yes/no p(yes) is >= t. The choice separates filepath from codeph better; the yes/no finds more UI labels.
 Recall comes from the gold rows (spans the writers did mark up, shown to kev as plain text). Precision comes from the
@@ -35,6 +37,9 @@ def key(r):
 def verdict(r, rule: str, t: float) -> str:
     if rule == "choice":
         return r["kev"]
+    if rule == "combined":
+        # the choice decides, except that a confident yes/no for uicontrol (the element the choice under-calls) wins
+        return "uicontrol" if r["p_uicontrol"] >= t and r["p_uicontrol"] >= max(r["p_filepath"], r["p_codeph"]) else r["kev"]
     if rule == "hybrid":
         el = max(ELEMENTS, key=lambda e: r["kev_probs"][e])
         return el if r[f"p_{el}"] >= t else "plain"
@@ -52,7 +57,7 @@ def main() -> int:
     ap.add_argument("candidates")
     ap.add_argument("--labels", required=True)
     ap.add_argument("--out", required=True)
-    ap.add_argument("--rule", default="hybrid", choices=["hybrid", "noul", "choice"])
+    ap.add_argument("--rule", default="hybrid", choices=["combined", "hybrid", "noul", "choice"])
     ap.add_argument("--threshold", type=float, default=0.7)
     a = ap.parse_args()
     out = Path(a.out); out.mkdir(parents=True, exist_ok=True)
@@ -60,7 +65,7 @@ def main() -> int:
     gold, cands = load(a.gold), load(a.candidates)
     by_key = {key(r): r for r in cands}
     labelled = [(by_key[key(l)], l["label"]) for l in load(a.labels) if key(l) in by_key]
-    rules = [("choice", 0.0)] + [(k, t) for k in ("noul", "hybrid") for t in THRESHOLDS]
+    rules = [("choice", 0.0)] + [(k, t) for k in ("noul", "hybrid", "combined") for t in THRESHOLDS]
 
     evaluation = {}
     for rule, t in rules:

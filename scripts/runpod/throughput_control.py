@@ -49,6 +49,10 @@ RESULTS = OUT / "results.jsonl"
 CONTROL_PORT = int(os.environ.get("CONTROL_PORT", "8001"))
 CONTROL_TOKEN = os.environ.get("CONTROL_TOKEN", "")
 SERVE_PORT = int(os.environ.get("SERVE_PORT", "8080"))
+#: The quantizer runs under its own interpreter: llmcompressor needs a
+#: compressed-tensors the engine is not built against, so the bootstrap puts it
+#: in a --system-site-packages venv and names it here.
+QUANT_PYTHON = os.environ.get("QUANT_PYTHON", sys.executable)
 
 #: Model directories the pod prepared. A job names one of these keys; it can
 #: never name a path.
@@ -281,7 +285,7 @@ def run_quantize(params: dict) -> dict:
     if model_key not in MODEL_KEYS or model_key == "fp16":
         raise ValueError(f"model_key must be a quantized key, one of {sorted(set(MODEL_KEYS) - {'fp16'})}")
     argv = [
-        sys.executable, str(REPO / "scripts/distill/quantize_w4a16.py"),
+        QUANT_PYTHON, str(REPO / "scripts/distill/quantize_w4a16.py"),
         "--model", str(MODEL_KEYS["fp16"]),
         "--output", str(MODEL_KEYS[model_key]),
         "--scheme", scheme,

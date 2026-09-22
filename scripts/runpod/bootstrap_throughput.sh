@@ -80,6 +80,7 @@ echo "commit: $(git -C "$REPO_DIR" rev-parse HEAD)"
 status "control-plane"
 OUT_DIR="$OUT" REPO_DIR="$REPO_DIR" MODEL_DIR="$MODEL_DIR" \
 CONTROL_TOKEN="$CONTROL_TOKEN" CONTROL_PORT=8001 SERVE_PORT=8080 \
+QUANT_PYTHON=/workspace/quantvenv/bin/python \
     nohup "$PYTHON" "$REPO_DIR/scripts/runpod/throughput_control.py" \
     >> "$OUT/control.stdout.log" 2>&1 &
 sleep 2
@@ -94,31 +95,40 @@ PY
 if [ ! -f "$MODEL_DIR/fp16/config.json" ]; then status "download-failed"; sleep infinity; fi
 du -sh "$MODEL_DIR/fp16"
 
-# llmcompressor must not be allowed to move torch, transformers or vllm: this
+# llmcompressor must not be allowed to move torch, transformers or vLLM: this
 # image's versions are matched to each other and to the driver, and a silent
-# torch upgrade would leave the pod with a quantized model and no engine.
+# torch upgrade would leave the pod with a quantized model and no engine. But
+# llmcompressor pins compressed-tensors to the exact patch (0.13.0 wants
+# 0.18.0, the image has 0.17.0), and installing it --no-deps just moves the
+# failure to an ImportError at quantization time -- which is what the first two
+# launches of this pod did.
+#
+# So: a venv with --system-site-packages. torch, transformers and CUDA are
+# inherited (nothing large is downloaded twice), while compressed-tensors and
+# llmcompressor are installed *into the venv only*. The quantizer runs under
+# that python; vLLM keeps the compressed-tensors it was built against. The
+# checkpoint is the handoff between them, and W4A16 pack-quantized is stable
+# across these patch versions.
 status "install-llmcompressor"
+QUANT_PYTHON=/workspace/quantvenv/bin/python
 "$PYTHON" -m pip list --format=freeze 2>/dev/null \
-    | grep -Ei '^(torch|transformers|vllm|compressed-tensors|numpy|datasets)==' > /workspace/constraints.txt
+    | grep -Ei '^(torch|transformers|vllm|numpy)==' > /workspace/constraints.txt
 cat /workspace/constraints.txt
-# llmcompressor's own pin set is always a release or two behind this image's
-# transformers, so the constrained resolve is expected to fail -- that is the
-# point of trying it first. The --no-deps fallback then needs llmcompressor's
-# runtime imports installed by hand, `datasets` above all (the first attempt at
-# this run died on exactly that, after the model had already loaded).
-if ! "$PYTHON" -m pip install -q --constraint /workspace/constraints.txt llmcompressor; then
-    echo "constrained install failed (expected); installing without deps"
-    "$PYTHON" -m pip install -q --no-deps llmcompressor || echo "llmcompressor unavailable"
-    "$PYTHON" -m pip install -q --constraint /workspace/constraints.txt \
-        datasets loguru pydantic pynvml || echo "helper install partially failed"
-fi
-"$PYTHON" -c "import llmcompressor, datasets; print('llmcompressor', llmcompressor.__version__, 'datasets', datasets.__version__)" \
-    || echo "llmcompressor does not import; the fp8 in-flight path is the fallback"
-"$PYTHON" -c "import torch, transformers, vllm; print('after install:', torch.__version__, transformers.__version__, vllm.__version__)"
+"$PYTHON" -m venv --system-site-packages /workspace/quantvenv
+"$QUANT_PYTHON" -m pip install -q --upgrade pip >/dev/null 2>&1
+"$QUANT_PYTHON" -m pip install -q --no-deps "llmcompressor==${LLMCOMPRESSOR_VERSION:-0.13.0}" \
+    || echo "llmcompressor install failed"
+"$QUANT_PYTHON" -m pip install -q --constraint /workspace/constraints.txt \
+    "compressed-tensors==${COMPRESSED_TENSORS_VERSION:-0.18.0}" datasets loguru pydantic pynvml \
+    || echo "helper install partially failed"
+"$QUANT_PYTHON" -c "import llmcompressor, compressed_tensors, datasets, torch; print('venv:', llmcompressor.__version__, compressed_tensors.__version__, torch.__version__)" \
+    || echo "llmcompressor does not import in the venv"
+"$PYTHON" -c "import vllm, compressed_tensors; print('engine still intact:', vllm.__version__, compressed_tensors.__version__)" \
+    || echo "WARNING: the engine's own imports broke"
 
 status "quantize"
 QUANT_LOG="$OUT/quantize.log"
-if "$PYTHON" "$REPO_DIR/scripts/distill/quantize_w4a16.py" \
+if "$QUANT_PYTHON" "$REPO_DIR/scripts/distill/quantize_w4a16.py" \
         --model "$MODEL_DIR/fp16" --output "$MODEL_DIR/w4a16" \
         --scheme "$QUANT_SCHEME" --algorithm "$QUANT_ALGORITHM" --samples "$QUANT_SAMPLES" \
         --dump-modules "$OUT/linear_modules.json" > "$QUANT_LOG" 2>&1; then

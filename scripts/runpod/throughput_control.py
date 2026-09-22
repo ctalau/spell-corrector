@@ -7,9 +7,11 @@ baked into the pod's entrypoint. This is the missing half: a small HTTP control
 plane, exposed through Runpod's port proxy, that accepts one benchmark step at
 a time, runs it asynchronously, and keeps every result.
 
-    POST /job      one step: which engine, which flags, which client load
+    POST /job      one step: which engine, which flags, which client load,
                    or {"action": "quantize", "params": {...}} to re-prepare a
-                   quantized copy of the model without redeploying the pod
+                   quantized copy of the model without redeploying the pod,
+                   or {"action": "eval", "params": {...}} to score a held-out
+                   BEA-60K split on the running engine
     GET  /status   what it is doing, and the last result
     GET  /results  results.jsonl, every step ever run
     GET  /file?p=  a file under the output directory (server logs, bench JSON)
@@ -269,6 +271,46 @@ QUANT_PARAMS = {
 }
 QUANT_ALGORITHMS = {"gptq", "awq", "rtn"}
 
+#: The only splits a job may score. `train` and `val` were trained on by the M7
+#: student, so scoring them would measure memorisation and produce a number
+#: that looks like accuracy; they are refused here rather than trusted to
+#: whoever writes the job.
+EVAL_SPLITS = {"test", "frozen_100", "dev"}
+EVAL_PARAMS = {"split": str, "limit": int, "concurrency": int, "label": str, "quantization": str}
+SPLIT_DIR = Path(os.environ.get("SPLIT_DIR", str(REPO / "data" / "distill")))
+
+
+def run_eval(params: dict) -> dict:
+    params = params or {}
+    unknown = set(params) - set(EVAL_PARAMS)
+    if unknown:
+        raise ValueError(f"unknown eval params: {sorted(unknown)}")
+    split = str(params.get("split", "test"))
+    if split not in EVAL_SPLITS:
+        raise ValueError(f"split must be one of {sorted(EVAL_SPLITS)} (train/val were trained on)")
+    split_path = SPLIT_DIR / f"{split}.jsonl"
+    if not split_path.is_file():
+        raise RuntimeError(f"{split_path} does not exist; the pod did not build the BEA splits")
+    label = str(params.get("label") or f"{split}")
+    safe = "".join(c for c in label if c.isalnum() or c in "-_")
+    argv = [
+        sys.executable, str(REPO / "scripts/distill/eval_openai_chat.py"),
+        "--split", str(split_path),
+        "--base-url", f"http://127.0.0.1:{SERVE_PORT}",
+        "--model", "spell",
+        "--concurrency", str(int(params.get("concurrency", 64))),
+        "--limit", str(int(params.get("limit", 0))),
+        "--label", label,
+        "--quantization", str(params.get("quantization", "")),
+        "--out-metrics", str(OUT / f"metrics_{safe}.json"),
+        "--out-predictions", str(OUT / f"predictions_{safe}.jsonl"),
+    ]
+    log(f"scoring {split} as {label}")
+    completed = subprocess.run(argv, capture_output=True, text=True, cwd=str(REPO), timeout=7200)
+    if completed.returncode != 0:
+        raise RuntimeError(f"eval rc={completed.returncode}: {completed.stderr[-2000:]}")
+    return json.loads(completed.stdout)
+
 
 def run_quantize(params: dict) -> dict:
     params = params or {}
@@ -335,13 +377,24 @@ def run_job(job: dict) -> dict:
         with RESULTS.open("a", encoding="utf-8") as handle:
             handle.write(json.dumps(record) + "\n")
         return record
-    if job.get("action") not in (None, "bench"):
+    if job.get("action") not in (None, "bench", "eval"):
         raise ValueError(f"unknown action {job.get('action')!r}")
     STATE["state"] = "starting-server"
     server_spec = job.get("server")
     if server_spec:
         start_server(server_spec, name)
     record["server"] = STATE["server"]
+    if job.get("action") == "eval":
+        STATE["state"] = "evaluating"
+        record["eval"] = run_eval(job.get("params"))
+        record["finished_at"] = time.time()
+        STATE["last"] = {"name": name, "split": record["eval"]["split"],
+                         "acc_casefold": record["eval"]["acc@1_casefold"],
+                         "n": record["eval"]["n"]}
+        with RESULTS.open("a", encoding="utf-8") as handle:
+            handle.write(json.dumps(record) + "\n")
+        STATE["steps_done"] += 1
+        return record
     client = dict(job.get("client") or {})
     sweep = client.pop("sweep", None) or [client.get("concurrency", 64)]
     STATE["state"] = "benchmarking"

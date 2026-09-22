@@ -21,6 +21,9 @@
 #   REPO_URL, REPO_BRANCH, REPO_COMMIT, HF_MODEL, CHOSEN_GPU, GPU_PRICE_USD_HR,
 #   CONTROL_TOKEN, QUANT_SCHEME, QUANT_ALGORITHM, QUANT_SAMPLES
 #
+# It also downloads BEA-60K and rebuilds the M7 held-out splits, so the control
+# plane can score a checkpoint as well as time it. BEA-60K is never committed.
+#
 # Deliberately no `set -u`: this sources the image's profile scripts, which
 # reference unset variables, and under `set -u` that aborts before the first
 # status write -- indistinguishable from "the pod did nothing".
@@ -139,6 +142,26 @@ else
     echo "quantization FAILED -- tail of $QUANT_LOG:"
     tail -40 "$QUANT_LOG"
     echo "the pod stays up: vLLM's in-flight --quantization fp8 path still serves a quantized model"
+fi
+
+# BEA-60K, for accuracy measurement only. It is a locked benchmark: the splits
+# below are rebuilt with build_data.py's fixed seed and its frozen-100
+# reconstruction check, so `test.jsonl` is byte-for-byte the split the Q4_K_M
+# student's 86.60% was measured on. Nothing here is committed, and the control
+# plane refuses to score `train`/`val`, which the student was trained on.
+status "bea-splits"
+if "$PYTHON" "$REPO_DIR/scripts/download_bea60k.py" --out-dir "$REPO_DIR/data/bea60k" > "$OUT/bea_download.log" 2>&1; then
+    "$PYTHON" "$REPO_DIR/scripts/distill/build_data.py" \
+        --bea-dir "$REPO_DIR/data/bea60k" \
+        --out-dir "$REPO_DIR/data/distill" \
+        --prompt "$REPO_DIR/artifacts/spell_slm_m6/direct_correct_v1.txt" \
+        > "$OUT/bea_splits.log" 2>&1 \
+        && cp "$REPO_DIR/data/distill/meta.json" "$OUT/split_meta.json" 2>/dev/null \
+        || { echo "split build FAILED"; tail -20 "$OUT/bea_splits.log"; }
+    wc -l "$REPO_DIR"/data/distill/*.jsonl 2>/dev/null
+else
+    echo "BEA download FAILED -- accuracy jobs will refuse; throughput jobs are unaffected"
+    tail -20 "$OUT/bea_download.log"
 fi
 
 "$PYTHON" - <<PY > "$OUT/RUNINFO.json"

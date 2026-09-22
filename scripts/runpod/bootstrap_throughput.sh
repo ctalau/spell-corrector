@@ -101,11 +101,19 @@ status "install-llmcompressor"
 "$PYTHON" -m pip list --format=freeze 2>/dev/null \
     | grep -Ei '^(torch|transformers|vllm|compressed-tensors|numpy|datasets)==' > /workspace/constraints.txt
 cat /workspace/constraints.txt
+# llmcompressor's own pin set is always a release or two behind this image's
+# transformers, so the constrained resolve is expected to fail -- that is the
+# point of trying it first. The --no-deps fallback then needs llmcompressor's
+# runtime imports installed by hand, `datasets` above all (the first attempt at
+# this run died on exactly that, after the model had already loaded).
 if ! "$PYTHON" -m pip install -q --constraint /workspace/constraints.txt llmcompressor; then
-    echo "constrained install failed; retrying without deps"
+    echo "constrained install failed (expected); installing without deps"
     "$PYTHON" -m pip install -q --no-deps llmcompressor || echo "llmcompressor unavailable"
-    "$PYTHON" -m pip install -q --constraint /workspace/constraints.txt loguru pydantic || true
+    "$PYTHON" -m pip install -q --constraint /workspace/constraints.txt \
+        datasets loguru pydantic pynvml || echo "helper install partially failed"
 fi
+"$PYTHON" -c "import llmcompressor, datasets; print('llmcompressor', llmcompressor.__version__, 'datasets', datasets.__version__)" \
+    || echo "llmcompressor does not import; the fp8 in-flight path is the fallback"
 "$PYTHON" -c "import torch, transformers, vllm; print('after install:', torch.__version__, transformers.__version__, vllm.__version__)"
 
 status "quantize"

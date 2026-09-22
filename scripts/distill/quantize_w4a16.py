@@ -87,14 +87,18 @@ def main() -> int:
 
     texts = build_calibration_texts(tokenizer, args.samples)
 
-    from datasets import Dataset
-
     encoded = [
         tokenizer(t, truncation=True, max_length=args.max_seq_len, add_special_tokens=False)
         for t in texts
     ]
-    dataset = Dataset.from_list([{"input_ids": e["input_ids"], "attention_mask": e["attention_mask"]}
-                                 for e in encoded])
+    rows = [{"input_ids": e["input_ids"], "attention_mask": e["attention_mask"]} for e in encoded]
+    try:  # `datasets` is llmcompressor's expected input, but it is a heavy
+        from datasets import Dataset  # dependency and this needs one column of ints
+
+        dataset = Dataset.from_list(rows)
+    except ImportError:
+        print("datasets is not installed; passing the calibration rows directly")
+        dataset = rows
 
     from llmcompressor import oneshot
 

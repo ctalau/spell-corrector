@@ -8,6 +8,8 @@ plane, exposed through Runpod's port proxy, that accepts one benchmark step at
 a time, runs it asynchronously, and keeps every result.
 
     POST /job      one step: which engine, which flags, which client load
+                   or {"action": "quantize", "params": {...}} to re-prepare a
+                   quantized copy of the model without redeploying the pod
     GET  /status   what it is doing, and the last result
     GET  /results  results.jsonl, every step ever run
     GET  /file?p=  a file under the output directory (server logs, bench JSON)
@@ -253,6 +255,57 @@ def run_client(port: int, client: dict, name: str, tag: str) -> dict:
     return json.loads(completed.stdout)
 
 
+#: The only preparation a job may trigger, and the only arguments it may set.
+#: Re-quantizing is the one setup step likely to need a second attempt (the
+#: scheme, the algorithm and the ignore list are all judgement calls), and
+#: redeploying a pod to change one of them costs more than the step it feeds.
+QUANT_PARAMS = {
+    "scheme": str, "algorithm": str, "samples": int, "max_seq_len": int, "ignore": list,
+    "model_key": str,
+}
+QUANT_ALGORITHMS = {"gptq", "awq", "rtn"}
+
+
+def run_quantize(params: dict) -> dict:
+    params = params or {}
+    unknown = set(params) - set(QUANT_PARAMS)
+    if unknown:
+        raise ValueError(f"unknown quantize params: {sorted(unknown)}")
+    algorithm = str(params.get("algorithm", "gptq"))
+    if algorithm not in QUANT_ALGORITHMS:
+        raise ValueError(f"algorithm must be one of {sorted(QUANT_ALGORITHMS)}")
+    scheme = str(params.get("scheme", "W4A16"))
+    if not scheme.replace("A", "").replace("W", "").isdigit():
+        raise ValueError("scheme looks wrong; expected something like W4A16")
+    model_key = str(params.get("model_key", "w4a16"))
+    if model_key not in MODEL_KEYS or model_key == "fp16":
+        raise ValueError(f"model_key must be a quantized key, one of {sorted(set(MODEL_KEYS) - {'fp16'})}")
+    argv = [
+        sys.executable, str(REPO / "scripts/distill/quantize_w4a16.py"),
+        "--model", str(MODEL_KEYS["fp16"]),
+        "--output", str(MODEL_KEYS[model_key]),
+        "--scheme", scheme,
+        "--algorithm", algorithm,
+        "--samples", str(int(params.get("samples", 256))),
+        "--max-seq-len", str(int(params.get("max_seq_len", 512))),
+        "--dump-modules", str(OUT / "linear_modules.json"),
+    ]
+    for pattern in params.get("ignore") or []:
+        if not isinstance(pattern, str):
+            raise ValueError("ignore patterns must be strings")
+        argv += ["--ignore", pattern]
+    stop_server()  # quantization wants the whole card
+    log(f"quantizing -> {model_key} ({algorithm} {scheme})")
+    log_path = OUT / f"quantize_{model_key}.log"
+    with log_path.open("w", encoding="utf-8") as handle:
+        completed = subprocess.run(argv, stdout=handle, stderr=subprocess.STDOUT, cwd=str(REPO), timeout=5400)
+    tail = log_path.read_text(encoding="utf-8", errors="replace")[-1500:]
+    if completed.returncode != 0:
+        raise RuntimeError(f"quantize rc={completed.returncode}; log tail:\n{tail}")
+    return {"model_key": model_key, "algorithm": algorithm, "scheme": scheme,
+            "log": log_path.name, "tail": tail}
+
+
 def gpu_snapshot() -> dict:
     try:
         out = subprocess.run(
@@ -270,8 +323,17 @@ def gpu_snapshot() -> dict:
 def run_job(job: dict) -> dict:
     name = job.get("name") or f"step{STATE['steps_done'] + 1}"
     STATE["current"] = name
-    STATE["state"] = "starting-server"
     record = {"name": name, "note": job.get("note"), "started_at": time.time(), "runs": []}
+    if job.get("action") == "quantize":
+        STATE["state"] = "quantizing"
+        record["quantize"] = run_quantize(job.get("params"))
+        record["finished_at"] = time.time()
+        with RESULTS.open("a", encoding="utf-8") as handle:
+            handle.write(json.dumps(record) + "\n")
+        return record
+    if job.get("action") not in (None, "bench"):
+        raise ValueError(f"unknown action {job.get('action')!r}")
+    STATE["state"] = "starting-server"
     server_spec = job.get("server")
     if server_spec:
         start_server(server_spec, name)
@@ -391,6 +453,8 @@ class Handler(BaseHTTPRequestHandler):
             self._send(400, json.dumps({"error": f"bad json: {exc}"}).encode())
             return
         try:  # reject a malformed job now, not sixty seconds into the queue
+            if job.get("action") == "quantize":
+                run_quantize.__doc__  # noqa: B018 - params are validated in the worker
             spec = job.get("server")
             if spec:
                 build_argv(spec.get("engine", "vllm"), Path("/dev/null"), spec.get("flags"), SERVE_PORT)

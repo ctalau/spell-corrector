@@ -1,8 +1,7 @@
 #!/usr/bin/env python3
 """Create a GPU pod that runs scripts/runpod/bootstrap_kev_markup.sh (kev-4b over the unmarked-markup candidates).
 
-kev-4b in bf16 is ~9GB, so any 16GB+ card holds it; the walk goes cheapest-first like launch_throughput.py, whose
-helpers this reuses. Reads RUNPOD_KEY, never prints it. Terminate with scripts/runpod/terminate.py.
+kev-4b in bf16 is ~9GB; runs go on an RTX 3090 (see GPUS). Reuses launch_throughput.py's helpers. Reads RUNPOD_KEY, never prints it. Terminate with scripts/runpod/terminate.py.
 """
 from __future__ import annotations
 
@@ -16,9 +15,9 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 from launch_throughput import api, create_first_available, entrypoint_command, resolve_commit  # noqa: E402
 
 IMAGE = "runpod/pytorch:1.0.2-cu1281-torch280-ubuntu2404"
-GPUS = [("NVIDIA RTX A5000", 0.16), ("NVIDIA RTX A4500", 0.19), ("NVIDIA RTX 4000 Ada Generation", 0.20),
-        ("NVIDIA GeForce RTX 3090", 0.22), ("NVIDIA GeForce RTX 4090", 0.34), ("NVIDIA RTX A6000", 0.33),
-        ("NVIDIA L4", 0.39), ("NVIDIA A40", 0.35)]
+# 3090s only: 24GB holds kev-4b with room to spare, and it is the cheapest card that does. Community first
+# (~$0.22/hr); pass --cloud SECURE if no community host has one free.
+GPUS = [("NVIDIA GeForce RTX 3090", 0.22)]
 
 
 def main() -> int:
@@ -28,8 +27,9 @@ def main() -> int:
     ap.add_argument("--commit", default=None)
     ap.add_argument("--kev-commit", default="08ab0b87d27cb5577a3b371ad7ed4e4686b0502b")
     ap.add_argument("--kev-run", default="jaredpalmer/kev-4b")
-    ap.add_argument("--cloud", default="SECURE", choices=("COMMUNITY", "SECURE"),
-                    help="SECURE by default: community hosts with a CUDA 12.4 driver cannot run the cu128 image")
+    ap.add_argument("--cloud", default="COMMUNITY", choices=("COMMUNITY", "SECURE"),
+                    help="a community host with a CUDA 12.4 driver cannot run the cu128 image; the bootstrap then stops "
+                         "at STATUS=no-cuda, so terminate and relaunch")
     a = ap.parse_args()
 
     commit = resolve_commit(a.repo_url, a.branch, a.commit)

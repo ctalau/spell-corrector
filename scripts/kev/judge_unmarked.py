@@ -32,6 +32,17 @@ OPTIONS = {
     "plain": "no element, ordinary prose: a product, technology, standard, format or document type named in passing, "
              "or a normal English word or phrase",
 }
+# One yes/no question per element, asked of every span. The choice above spreads one unit of probability over four
+# answers and in the first run it called 3 in 4 real <uicontrol> spans "plain"; separate yes/no questions let each
+# element be thresholded on its own.
+NOUL = {
+    "uicontrol": "Is \"{match}\" the name of a specific control or area of the application's user interface, such as a "
+                 "button, menu, menu item, tab, check box, option, field, view, pane, toolbar, dialog box, wizard page "
+                 "or preferences page?",
+    "filepath": "Is \"{match}\" the name of a file or folder, or a path to one?",
+    "codeph": "Is \"{match}\" literal code: an element, attribute, property, parameter, variable, function, method or "
+              "class name, a command-line option, or a value to be typed exactly as written?",
+}
 WINDOW = 700  # characters of context kept around the marked span
 
 
@@ -73,17 +84,19 @@ def main() -> int:
     with open(out, "a", encoding="utf-8") as f:
         for i, r in enumerate(rows):
             if (r["file"], r["line"], r["context"]) in done: continue
-            req = SystemOneRequest(state=clip(r["context"]), questions={"tag": {
-                "type": "choice", "instructions": INSTRUCTIONS.format(match=r["match"]), "criteria": OPTIONS}})
+            qs = {"tag": {"type": "choice", "instructions": INSTRUCTIONS.format(match=r["match"]), "criteria": OPTIONS}}
+            qs.update({f"is_{el}": {"type": "noul", "instructions": q.format(match=r["match"])} for el, q in NOUL.items()})
+            req = SystemOneRequest(state=clip(r["context"]), questions=qs)
             rec, meta = to_record(req)
             enc = model.encode(tok, rec, max_state=1024, max_branch=2048)
             s = time.perf_counter()
             with torch.no_grad():
                 probs = model.probs(enc)
             ms = 1000 * (time.perf_counter() - s)
-            ans = to_answers([p.float().tolist() for p in probs], meta)["tag"]
+            answers = to_answers([p.float().tolist() for p in probs], meta)
+            ans = answers["tag"]
             r = {**r, "kev": ans["choice"], "kev_confidence": ans["confidence"], "kev_probs": ans["probabilities"],
-                 "latency_ms": round(ms, 1)}
+                 **{f"p_{el}": answers[f"is_{el}"]["noul"] for el in NOUL}, "latency_ms": round(ms, 1)}
             f.write(json.dumps(r, ensure_ascii=False) + "\n"); f.flush()
             if (i + 1) % 25 == 0: print(f"{i + 1}/{len(rows)} {ms:.0f}ms", file=sys.stderr, flush=True)
     return 0

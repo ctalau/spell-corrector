@@ -177,7 +177,7 @@ def neighbour_text(block) -> str:
         dd = block.getparent().find("dd") if block.getparent() is not None else None
         others = [dd] if dd is not None else []
     elif name in ("entry", "stentry"):
-        others = [c for c in block.getparent() if c is not block]
+        others = [c for c in block.getparent() if c is not block and local(c.tag)]
     else:
         return ""
     return " | ".join(norm("".join(o.itertext()), [])[0].strip() for o in others)[:400]

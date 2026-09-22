@@ -4,12 +4,12 @@
 |---|---|
 | **Status** | **completed** — 2026-09-22 |
 | **When** | 2026-09-22, pod `4068yfukcyxtnv`, NVIDIA GeForce RTX 3090 (community, $0.22/hr), commit `2337ef8` |
-| **Headline result** | **420 corrections/s** sustained on one 3090, at a p50 of **0.304 s** and p90 0.378 s under 128-way concurrency — **$0.000145 per 1,000 corrections** |
-| **Cost** | ~$0.28 of GPU time (three pods: two short failed preparations, one 60-minute working pod) |
+| **Headline result** | **420 corrections/s** sustained on one 3090, at a p50 of **0.304 s** and p90 0.378 s under 128-way concurrency — **$0.000145 per 1,000 corrections**, at **87.40%** on the held-out BEA test split (n=2,000), 0.15 pp below the unquantized model |
+| **Cost** | ~$0.36 of GPU time (the climb on one 60-minute pod, two short failed preparations before it, and a ~20-minute pod for the accuracy follow-up) |
 | **What it settles** | What a single card actually serves. Also: on this workload **int8 activations are the whole win and int4 weights are worth nothing** — W4A16 ties unquantized fp16 (348 rps), W8A8 beats it by 27% |
-| **What it leaves open** | The quality of the W8A8 checkpoint. This experiment measured throughput only and scored no accuracy |
-| **Code** | `scripts/bench_spell_throughput.py`, `scripts/distill/quantize_w4a16.py`, `scripts/runpod/{launch,bootstrap}_throughput.*`, `scripts/runpod/throughput_{control,driver}.py` |
-| **Artifacts** | [`results/`](results/) — every step's raw JSON, the pod's setup log, the quantizer's module list |
+| **What it leaves open** | Nothing on quantization choice. The follow-up below scored all three checkpoints on the held-out BEA splits: **W8A8 costs 0.15 pp against fp16 (p=0.63, indistinguishable); W4A16 costs 1.15 pp (p=0.003, real)** — so int4 is dominated on both axes |
+| **Code** | `scripts/bench_spell_throughput.py`, `scripts/distill/quantize_w4a16.py`, `scripts/distill/eval_openai_chat.py`, `scripts/runpod/{launch,bootstrap}_throughput.*`, `scripts/runpod/throughput_{control,driver}.py` |
+| **Artifacts** | [`results/`](results/) — every step's raw throughput JSON, the six accuracy metric files, the split metadata and the quantizer's module list |
 
 ---
 
@@ -130,13 +130,10 @@ is about 69 million corrections at this rate.
 
 ## Health warnings
 
-- **No accuracy was measured, and none should be inferred.** BEA-60K is locked;
-  benchmark prompts here are synthesised from `data/wikipedia_misspellings.txt`,
-  the same rule `scripts/benchmark_llama_server.py` follows. The W8A8
-  checkpoint's answers were only eyeballed (they are plausible single words:
-  `achieve`, `accomplish`, `accurately`), never scored. **Quantization quality is
-  the open question this experiment does not answer** — the Q4_K_M student cost
-  0.7 points against NF4, and W8A8 has not been given the same treatment.
+- **The throughput numbers above contain no accuracy claim.** Their load is
+  synthesised from `data/wikipedia_misspellings.txt`, never BEA-60K — a
+  hill-climbing loop is exactly the repeated-measurement surface a locked
+  benchmark must stay out of. Accuracy was measured separately and once, below.
 - **Run-to-run variance is about ±5%.** The winning configuration measured
   441.5 rps over a 30-second window in step 6 and 420.3 over a 60-second window
   in step 10. The longer window is the honest number; both are reported.
@@ -144,6 +141,68 @@ is about 69 million corrections at this rate.
   CPU and PCIe; this is one 3090, not the population of 3090s.
 - **A step is 30–60 seconds of steady state**, not a soak test. Nothing here
   speaks to thermal behaviour or stability over hours.
+
+## Follow-up: what the quantization costs in accuracy
+
+Measured after the climb, on a second pod, as a **single scoring pass** — no
+tuning, no repeats, no selection among variants. Same decode contract as every
+previous corrector number in this repo: greedy, temperature 0, `max_tokens` 5,
+`direct_correct_v1.txt`, the same `normalize_prediction`.
+
+### Which rows are eligible
+
+Only 2,100 of BEA-60K's 68,395 word errors can honestly be used here. The M7
+student was **trained on 64,295 of them** — `scripts/distill/build_data.py`
+splits the benchmark by source sentence into `train`/`val`/`dev`/`test`/
+`frozen_100`, and running the full benchmark would mostly be scoring the
+training set and calling it accuracy. The splits were rebuilt on the pod from
+the same seed with the same frozen-100 reconstruction check, so `test.jsonl` is
+the split the deployed Q4_K_M's 86.60% was measured on, and the control plane
+refuses to score `train` or `val` at all.
+
+### Results
+
+| Checkpoint | Engine | test, n=2,000 exact | test casefold | frozen 100 |
+|---|---|---:|---:|---:|
+| **fp16 (unquantized)** | vLLM, this pod | 86.65% | **87.55%** | 89.0% |
+| **W8A8 int8** (the throughput winner) | vLLM, this pod | 86.60% | **87.40%** | 87.0% |
+| **W4A16 int4** | vLLM, this pod | 85.55% | **86.40%** | 83.0% |
+| NF4 4-bit (experiment 8) | transformers GPU | — | 87.30% | — |
+| Q4_K_M GGUF (deployed) | llama.cpp, 4 vCPU | 85.60% | 86.60% | 88.0% |
+
+95% Wilson intervals on the n=2,000 rows are about ±1.5 pp and overlap heavily,
+so the *paired* comparison is the one that carries information — the three
+checkpoints answered the same 2,000 rows, so the disagreements can be counted
+directly:
+
+| vs fp16, on the same 2,000 rows | Agreement | fp16 right → quantized wrong | fp16 wrong → quantized right | Net | McNemar |
+|---|---:|---:|---:|---:|---:|
+| **W8A8** | 98.30% | 10 | 7 | **−3** | p = 0.63 |
+| **W4A16** | 94.95% | 40 | 17 | **−23** | p = 0.0032 |
+
+**W8A8 is statistically indistinguishable from the unquantized model.** Three
+rows out of 2,000, seven of which it got right where fp16 got them wrong: that
+is noise, not a tax. **W4A16's 1.15 pp is a real regression** (p = 0.003), and
+that settles the trade-off the throughput climb opened:
+
+> int4 weight-only quantization on this model is **slower-or-equal *and* less
+> accurate** than int8. It is dominated on both axes, and the only thing it buys
+> is a smaller file on a card that had 21 GB spare.
+
+Where W8A8 does differ from fp16, it differs the way a slightly blunter model
+would — `worthful` → `worthy` instead of `worthwhile`, `Desingres` → `Designs`
+instead of `Designers`. Nothing pathological, no empty answers and no request
+failures in any of the six scoring passes.
+
+### Two asides worth keeping
+
+- **Scoring 2,000 rows took 7.75 seconds**, against 1,209 seconds for the same
+  split on the CPU Q4_K_M path — a 156× shorter evaluation loop. Evaluation
+  being this cheap is itself a result: it makes a held-out re-score a routine
+  step rather than an experiment.
+- The `frozen_100` column moves by 6 points across these rows on 100 examples.
+  It should not be read as a ranking; it is here because previous milestones
+  reported it.
 
 ## Reproducing
 
@@ -171,6 +230,14 @@ python scripts/distill/quantize_w4a16.py --model <fp16> --output <w8a8> \
     --scheme W8A8 --algorithm gptq --samples 256 \
     --ignore lm_head --ignore 're:.*mtp.*' --ignore 're:.*visual.*' \
     --ignore 're:.*vision.*' --ignore 're:.*in_proj_a' --ignore 're:.*in_proj_b'
+```
+
+and the accuracy pass, against that server, on a rebuilt held-out split:
+
+```bash
+python scripts/distill/eval_openai_chat.py --split data/distill/test.jsonl \
+    --base-url http://127.0.0.1:8080 --concurrency 64 \
+    --out-metrics metrics.json --out-predictions predictions.jsonl
 ```
 
 ## Three things that cost a pod each, recorded so they do not again

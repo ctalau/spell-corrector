@@ -1,0 +1,21 @@
+{
+  "baseline": "reports/experiments/10-08b-3090-throughput/results/predictions_m7_student_fp16_test.jsonl",
+  "candidate": "reports/experiments/10-08b-3090-throughput/results/predictions_m7_student_w8a8_test.jsonl",
+  "field": "casefold",
+  "n": 2000,
+  "baseline_accuracy": 0.8755,
+  "candidate_accuracy": 0.874,
+  "baseline_ci95": [
+    0.8603065753320525,
+    0.8892536693499622
+  ],
+  "candidate_ci95": [
+    0.858735326365837,
+    0.8878306696689793
+  ],
+  "prediction_agreement": 0.983,
+  "baseline_right_candidate_wrong": 10,
+  "baseline_wrong_candidate_right": 7,
+  "net": -3,
+  "mcnemar_exact_p": 0.629058837890625
+}

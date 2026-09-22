@@ -58,6 +58,15 @@ HF_MODEL="${HF_MODEL:-ctalau/qwen35-08b-spell-m7-distill}"
 QUANT_SCHEME="${QUANT_SCHEME:-W4A16}"
 QUANT_ALGORITHM="${QUANT_ALGORITHM:-gptq}"
 QUANT_SAMPLES="${QUANT_SAMPLES:-256}"
+# The directory has to follow the scheme. It used to be hard-coded to w4a16,
+# so launching with --quant-scheme W8A8 produced a W8A8 checkpoint sitting in
+# a directory the control plane calls "w4a16" -- a mislabelled artifact is
+# worse than a missing one.
+case "$QUANT_SCHEME" in
+    W4A16) QUANT_MODEL_KEY="${QUANT_MODEL_KEY:-w4a16}" ;;
+    W8A8)  QUANT_MODEL_KEY="${QUANT_MODEL_KEY:-w8a8}" ;;
+    *)     QUANT_MODEL_KEY="${QUANT_MODEL_KEY:-w4a16}" ;;
+esac
 
 echo "gpu:    ${CHOSEN_GPU:-unknown} (\$${GPU_PRICE_USD_HR:-?}/hr)"
 nvidia-smi || echo "nvidia-smi failed"
@@ -132,11 +141,11 @@ cat /workspace/constraints.txt
 status "quantize"
 QUANT_LOG="$OUT/quantize.log"
 if "$QUANT_PYTHON" "$REPO_DIR/scripts/distill/quantize_w4a16.py" \
-        --model "$MODEL_DIR/fp16" --output "$MODEL_DIR/w4a16" \
+        --model "$MODEL_DIR/fp16" --output "$MODEL_DIR/$QUANT_MODEL_KEY" \
         --scheme "$QUANT_SCHEME" --algorithm "$QUANT_ALGORITHM" --samples "$QUANT_SAMPLES" \
         --dump-modules "$OUT/linear_modules.json" > "$QUANT_LOG" 2>&1; then
-    echo "quantization ok"
-    du -sh "$MODEL_DIR/w4a16"
+    echo "quantization ok ($QUANT_SCHEME -> $QUANT_MODEL_KEY)"
+    du -sh "$MODEL_DIR/$QUANT_MODEL_KEY"
 else
     status "quantize-failed"
     echo "quantization FAILED -- tail of $QUANT_LOG:"

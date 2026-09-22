@@ -372,7 +372,10 @@ def worker() -> None:
             record = run_job(job)
             STATE["state"] = "idle"
             STATE["error"] = None
-            log(f"{record['name']}: best {record['best_rps']} req/s at c={record['best_concurrency']}")
+            if "best_rps" in record:
+                log(f"{record['name']}: best {record['best_rps']} req/s at c={record['best_concurrency']}")
+            else:  # a preparation job (quantize) produces no throughput number
+                log(f"{record['name']}: done")
         except Exception as exc:  # noqa: BLE001 - reporting it is the point
             STATE["state"] = "failed"
             STATE["error"] = f"{exc}\n{traceback.format_exc()[-1500:]}"

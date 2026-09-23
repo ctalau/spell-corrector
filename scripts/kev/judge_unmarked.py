@@ -18,8 +18,6 @@ from pathlib import Path
 KEV = Path(os.environ.get("KEV_DIR", "/home/user/jaredpalmer/kev"))
 sys.path.insert(0, str(KEV))
 
-import torch  # noqa: E402
-
 # Fixed before the first run; not tuned on the validation rows.
 INSTRUCTIONS = ("This is a paragraph from a software user guide written in DITA. The span \"{match}\" is marked "
                 "[[like this]] in the text. Which DITA inline element should wrap that span?")
@@ -56,6 +54,8 @@ def clip(context: str) -> str:
 
 
 def main() -> int:
+    import torch  # here, not at the top, so judge_unmarked_jev.py can import the questions without torch
+
     ap = argparse.ArgumentParser()
     ap.add_argument("inp")
     ap.add_argument("--out", required=True)

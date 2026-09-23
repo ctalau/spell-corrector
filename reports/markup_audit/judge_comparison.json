@@ -1,0 +1,1648 @@
+{
+  "spans_compared": {
+    "gold": 900,
+    "candidates": 13853,
+    "hand_labelled": 200
+  },
+  "rules": {
+    "choice": {
+      "kev-4b": {
+        "gold_recall": {
+          "uicontrol": 0.33,
+          "filepath": 0.91,
+          "codeph": 0.6466666666666666
+        },
+        "sample_flagged": 99,
+        "sample_precision": 0.7474747474747475,
+        "sample_recall": 0.6607142857142857,
+        "sample_right_flagged_by_source": {
+          "uicontrol": [
+            2,
+            6
+          ],
+          "filepath": [
+            28,
+            36
+          ],
+          "codeph": [
+            29,
+            32
+          ],
+          "emphasis": [
+            5,
+            10
+          ],
+          "dt": [
+            10,
+            15
+          ]
+        },
+        "candidates_flagged": 4644
+      },
+      "jev-1.13": {
+        "gold_recall": {
+          "uicontrol": 0.7833333333333333,
+          "filepath": 0.8466666666666667,
+          "codeph": 0.89
+        },
+        "sample_flagged": 139,
+        "sample_precision": 0.7266187050359713,
+        "sample_recall": 0.9017857142857143,
+        "sample_right_flagged_by_source": {
+          "uicontrol": [
+            8,
+            14
+          ],
+          "filepath": [
+            30,
+            37
+          ],
+          "codeph": [
+            36,
+            36
+          ],
+          "emphasis": [
+            7,
+            16
+          ],
+          "dt": [
+            20,
+            36
+          ]
+        },
+        "candidates_flagged": 7709
+      }
+    },
+    "noul@0.5": {
+      "kev-4b": {
+        "gold_recall": {
+          "uicontrol": 0.66,
+          "filepath": 0.75,
+          "codeph": 0.8766666666666667
+        },
+        "sample_flagged": 179,
+        "sample_precision": 0.5139664804469274,
+        "sample_recall": 0.8214285714285714,
+        "sample_right_flagged_by_source": {
+          "uicontrol": [
+            8,
+            34
+          ],
+          "filepath": [
+            24,
+            36
+          ],
+          "codeph": [
+            32,
+            37
+          ],
+          "emphasis": [
+            8,
+            32
+          ],
+          "dt": [
+            20,
+            40
+          ]
+        },
+        "candidates_flagged": 11771
+      },
+      "jev-1.13": {
+        "gold_recall": {
+          "uicontrol": 0.73,
+          "filepath": 0.89,
+          "codeph": 0.81
+        },
+        "sample_flagged": 132,
+        "sample_precision": 0.7803030303030303,
+        "sample_recall": 0.9196428571428571,
+        "sample_right_flagged_by_source": {
+          "uicontrol": [
+            10,
+            21
+          ],
+          "filepath": [
+            30,
+            32
+          ],
+          "codeph": [
+            33,
+            35
+          ],
+          "emphasis": [
+            8,
+            13
+          ],
+          "dt": [
+            22,
+            31
+          ]
+        },
+        "candidates_flagged": 6830
+      }
+    },
+    "noul@0.6": {
+      "kev-4b": {
+        "gold_recall": {
+          "uicontrol": 0.6466666666666666,
+          "filepath": 0.7466666666666667,
+          "codeph": 0.84
+        },
+        "sample_flagged": 166,
+        "sample_precision": 0.5481927710843374,
+        "sample_recall": 0.8125,
+        "sample_right_flagged_by_source": {
+          "uicontrol": [
+            8,
+            28
+          ],
+          "filepath": [
+            24,
+            35
+          ],
+          "codeph": [
+            31,
+            36
+          ],
+          "emphasis": [
+            8,
+            28
+          ],
+          "dt": [
+            20,
+            39
+          ]
+        },
+        "candidates_flagged": 10311
+      },
+      "jev-1.13": {
+        "gold_recall": {
+          "uicontrol": 0.71,
+          "filepath": 0.8866666666666667,
+          "codeph": 0.7266666666666667
+        },
+        "sample_flagged": 116,
+        "sample_precision": 0.8189655172413793,
+        "sample_recall": 0.8482142857142857,
+        "sample_right_flagged_by_source": {
+          "uicontrol": [
+            9,
+            16
+          ],
+          "filepath": [
+            30,
+            32
+          ],
+          "codeph": [
+            28,
+            30
+          ],
+          "emphasis": [
+            8,
+            11
+          ],
+          "dt": [
+            20,
+            27
+          ]
+        },
+        "candidates_flagged": 5642
+      }
+    },
+    "noul@0.7": {
+      "kev-4b": {
+        "gold_recall": {
+          "uicontrol": 0.61,
+          "filepath": 0.7333333333333333,
+          "codeph": 0.7366666666666667
+        },
+        "sample_flagged": 147,
+        "sample_precision": 0.5850340136054422,
+        "sample_recall": 0.7678571428571429,
+        "sample_right_flagged_by_source": {
+          "uicontrol": [
+            8,
+            22
+          ],
+          "filepath": [
+            23,
+            33
+          ],
+          "codeph": [
+            27,
+            31
+          ],
+          "emphasis": [
+            8,
+            24
+          ],
+          "dt": [
+            20,
+            37
+          ]
+        },
+        "candidates_flagged": 8320
+      },
+      "jev-1.13": {
+        "gold_recall": {
+          "uicontrol": 0.67,
+          "filepath": 0.8366666666666667,
+          "codeph": 0.63
+        },
+        "sample_flagged": 105,
+        "sample_precision": 0.8380952380952381,
+        "sample_recall": 0.7857142857142857,
+        "sample_right_flagged_by_source": {
+          "uicontrol": [
+            9,
+            14
+          ],
+          "filepath": [
+            29,
+            31
+          ],
+          "codeph": [
+            26,
+            28
+          ],
+          "emphasis": [
+            6,
+            8
+          ],
+          "dt": [
+            18,
+            24
+          ]
+        },
+        "candidates_flagged": 4543
+      }
+    },
+    "noul@0.8": {
+      "kev-4b": {
+        "gold_recall": {
+          "uicontrol": 0.5666666666666667,
+          "filepath": 0.6866666666666666,
+          "codeph": 0.5766666666666667
+        },
+        "sample_flagged": 99,
+        "sample_precision": 0.6565656565656566,
+        "sample_recall": 0.5803571428571429,
+        "sample_right_flagged_by_source": {
+          "uicontrol": [
+            7,
+            14
+          ],
+          "filepath": [
+            20,
+            27
+          ],
+          "codeph": [
+            14,
+            15
+          ],
+          "emphasis": [
+            7,
+            17
+          ],
+          "dt": [
+            17,
+            26
+          ]
+        },
+        "candidates_flagged": 5551
+      },
+      "jev-1.13": {
+        "gold_recall": {
+          "uicontrol": 0.5566666666666666,
+          "filepath": 0.7533333333333333,
+          "codeph": 0.4766666666666667
+        },
+        "sample_flagged": 75,
+        "sample_precision": 0.9466666666666667,
+        "sample_recall": 0.6339285714285714,
+        "sample_right_flagged_by_source": {
+          "uicontrol": [
+            6,
+            7
+          ],
+          "filepath": [
+            26,
+            26
+          ],
+          "codeph": [
+            22,
+            23
+          ],
+          "emphasis": [
+            2,
+            3
+          ],
+          "dt": [
+            15,
+            16
+          ]
+        },
+        "candidates_flagged": 3099
+      }
+    },
+    "noul@0.9": {
+      "kev-4b": {
+        "gold_recall": {
+          "uicontrol": 0.46,
+          "filepath": 0.53,
+          "codeph": 0.28
+        },
+        "sample_flagged": 52,
+        "sample_precision": 0.8461538461538461,
+        "sample_recall": 0.39285714285714285,
+        "sample_right_flagged_by_source": {
+          "uicontrol": [
+            5,
+            7
+          ],
+          "filepath": [
+            18,
+            20
+          ],
+          "codeph": [
+            7,
+            8
+          ],
+          "emphasis": [
+            3,
+            5
+          ],
+          "dt": [
+            11,
+            12
+          ]
+        },
+        "candidates_flagged": 2169
+      },
+      "jev-1.13": {
+        "gold_recall": {
+          "uicontrol": 0.3566666666666667,
+          "filepath": 0.10333333333333333,
+          "codeph": 0.21666666666666667
+        },
+        "sample_flagged": 31,
+        "sample_precision": 0.9354838709677419,
+        "sample_recall": 0.25892857142857145,
+        "sample_right_flagged_by_source": {
+          "uicontrol": [
+            2,
+            2
+          ],
+          "filepath": [
+            5,
+            5
+          ],
+          "codeph": [
+            14,
+            15
+          ],
+          "emphasis": [
+            1,
+            1
+          ],
+          "dt": [
+            7,
+            8
+          ]
+        },
+        "candidates_flagged": 1421
+      }
+    },
+    "hybrid@0.5": {
+      "kev-4b": {
+        "gold_recall": {
+          "uicontrol": 0.5166666666666667,
+          "filepath": 0.9033333333333333,
+          "codeph": 0.8533333333333334
+        },
+        "sample_flagged": 171,
+        "sample_precision": 0.5029239766081871,
+        "sample_recall": 0.7678571428571429,
+        "sample_right_flagged_by_source": {
+          "uicontrol": [
+            6,
+            33
+          ],
+          "filepath": [
+            28,
+            35
+          ],
+          "codeph": [
+            30,
+            35
+          ],
+          "emphasis": [
+            7,
+            31
+          ],
+          "dt": [
+            15,
+            37
+          ]
+        },
+        "candidates_flagged": 10929
+      },
+      "jev-1.13": {
+        "gold_recall": {
+          "uicontrol": 0.7233333333333334,
+          "filepath": 0.83,
+          "codeph": 0.8166666666666667
+        },
+        "sample_flagged": 123,
+        "sample_precision": 0.8211382113821138,
+        "sample_recall": 0.9017857142857143,
+        "sample_right_flagged_by_source": {
+          "uicontrol": [
+            10,
+            17
+          ],
+          "filepath": [
+            29,
+            32
+          ],
+          "codeph": [
+            34,
+            35
+          ],
+          "emphasis": [
+            8,
+            11
+          ],
+          "dt": [
+            20,
+            28
+          ]
+        },
+        "candidates_flagged": 6350
+      }
+    },
+    "hybrid@0.6": {
+      "kev-4b": {
+        "gold_recall": {
+          "uicontrol": 0.5066666666666667,
+          "filepath": 0.8733333333333333,
+          "codeph": 0.8233333333333334
+        },
+        "sample_flagged": 151,
+        "sample_precision": 0.5629139072847682,
+        "sample_recall": 0.7589285714285714,
+        "sample_right_flagged_by_source": {
+          "uicontrol": [
+            6,
+            24
+          ],
+          "filepath": [
+            28,
+            34
+          ],
+          "codeph": [
+            29,
+            34
+          ],
+          "emphasis": [
+            7,
+            26
+          ],
+          "dt": [
+            15,
+            33
+          ]
+        },
+        "candidates_flagged": 9338
+      },
+      "jev-1.13": {
+        "gold_recall": {
+          "uicontrol": 0.7166666666666667,
+          "filepath": 0.8233333333333334,
+          "codeph": 0.7333333333333333
+        },
+        "sample_flagged": 112,
+        "sample_precision": 0.8392857142857143,
+        "sample_recall": 0.8392857142857143,
+        "sample_right_flagged_by_source": {
+          "uicontrol": [
+            9,
+            14
+          ],
+          "filepath": [
+            29,
+            32
+          ],
+          "codeph": [
+            29,
+            30
+          ],
+          "emphasis": [
+            8,
+            10
+          ],
+          "dt": [
+            19,
+            26
+          ]
+        },
+        "candidates_flagged": 5313
+      }
+    },
+    "hybrid@0.7": {
+      "kev-4b": {
+        "gold_recall": {
+          "uicontrol": 0.48333333333333334,
+          "filepath": 0.85,
+          "codeph": 0.7233333333333334
+        },
+        "sample_flagged": 129,
+        "sample_precision": 0.627906976744186,
+        "sample_recall": 0.7232142857142857,
+        "sample_right_flagged_by_source": {
+          "uicontrol": [
+            6,
+            15
+          ],
+          "filepath": [
+            27,
+            32
+          ],
+          "codeph": [
+            26,
+            30
+          ],
+          "emphasis": [
+            7,
+            22
+          ],
+          "dt": [
+            15,
+            30
+          ]
+        },
+        "candidates_flagged": 7398
+      },
+      "jev-1.13": {
+        "gold_recall": {
+          "uicontrol": 0.6633333333333333,
+          "filepath": 0.7833333333333333,
+          "codeph": 0.64
+        },
+        "sample_flagged": 102,
+        "sample_precision": 0.8529411764705882,
+        "sample_recall": 0.7767857142857143,
+        "sample_right_flagged_by_source": {
+          "uicontrol": [
+            9,
+            14
+          ],
+          "filepath": [
+            28,
+            30
+          ],
+          "codeph": [
+            26,
+            27
+          ],
+          "emphasis": [
+            6,
+            7
+          ],
+          "dt": [
+            18,
+            24
+          ]
+        },
+        "candidates_flagged": 4333
+      }
+    },
+    "hybrid@0.8": {
+      "kev-4b": {
+        "gold_recall": {
+          "uicontrol": 0.4633333333333333,
+          "filepath": 0.7433333333333333,
+          "codeph": 0.5766666666666667
+        },
+        "sample_flagged": 82,
+        "sample_precision": 0.7195121951219512,
+        "sample_recall": 0.5267857142857143,
+        "sample_right_flagged_by_source": {
+          "uicontrol": [
+            5,
+            8
+          ],
+          "filepath": [
+            20,
+            24
+          ],
+          "codeph": [
+            14,
+            15
+          ],
+          "emphasis": [
+            6,
+            15
+          ],
+          "dt": [
+            14,
+            20
+          ]
+        },
+        "candidates_flagged": 4884
+      },
+      "jev-1.13": {
+        "gold_recall": {
+          "uicontrol": 0.5566666666666666,
+          "filepath": 0.71,
+          "codeph": 0.48
+        },
+        "sample_flagged": 73,
+        "sample_precision": 0.958904109589041,
+        "sample_recall": 0.625,
+        "sample_right_flagged_by_source": {
+          "uicontrol": [
+            6,
+            7
+          ],
+          "filepath": [
+            25,
+            25
+          ],
+          "codeph": [
+            22,
+            22
+          ],
+          "emphasis": [
+            2,
+            3
+          ],
+          "dt": [
+            15,
+            16
+          ]
+        },
+        "candidates_flagged": 3019
+      }
+    },
+    "hybrid@0.9": {
+      "kev-4b": {
+        "gold_recall": {
+          "uicontrol": 0.3933333333333333,
+          "filepath": 0.5233333333333333,
+          "codeph": 0.28
+        },
+        "sample_flagged": 46,
+        "sample_precision": 0.8695652173913043,
+        "sample_recall": 0.35714285714285715,
+        "sample_right_flagged_by_source": {
+          "uicontrol": [
+            3,
+            4
+          ],
+          "filepath": [
+            17,
+            18
+          ],
+          "codeph": [
+            7,
+            8
+          ],
+          "emphasis": [
+            3,
+            5
+          ],
+          "dt": [
+            10,
+            11
+          ]
+        },
+        "candidates_flagged": 1950
+      },
+      "jev-1.13": {
+        "gold_recall": {
+          "uicontrol": 0.3566666666666667,
+          "filepath": 0.10333333333333333,
+          "codeph": 0.22
+        },
+        "sample_flagged": 30,
+        "sample_precision": 0.9666666666666667,
+        "sample_recall": 0.25892857142857145,
+        "sample_right_flagged_by_source": {
+          "uicontrol": [
+            2,
+            2
+          ],
+          "filepath": [
+            5,
+            5
+          ],
+          "codeph": [
+            14,
+            14
+          ],
+          "emphasis": [
+            1,
+            1
+          ],
+          "dt": [
+            7,
+            8
+          ]
+        },
+        "candidates_flagged": 1410
+      }
+    },
+    "combined@0.5": {
+      "kev-4b": {
+        "gold_recall": {
+          "uicontrol": 0.6866666666666666,
+          "filepath": 0.91,
+          "codeph": 0.6366666666666667
+        },
+        "sample_flagged": 126,
+        "sample_precision": 0.7222222222222222,
+        "sample_recall": 0.8125,
+        "sample_right_flagged_by_source": {
+          "uicontrol": [
+            8,
+            18
+          ],
+          "filepath": [
+            28,
+            36
+          ],
+          "codeph": [
+            29,
+            32
+          ],
+          "emphasis": [
+            6,
+            11
+          ],
+          "dt": [
+            20,
+            29
+          ]
+        },
+        "candidates_flagged": 5700
+      },
+      "jev-1.13": {
+        "gold_recall": {
+          "uicontrol": 0.82,
+          "filepath": 0.8466666666666667,
+          "codeph": 0.88
+        },
+        "sample_flagged": 144,
+        "sample_precision": 0.7361111111111112,
+        "sample_recall": 0.9464285714285714,
+        "sample_right_flagged_by_source": {
+          "uicontrol": [
+            10,
+            18
+          ],
+          "filepath": [
+            30,
+            37
+          ],
+          "codeph": [
+            36,
+            36
+          ],
+          "emphasis": [
+            7,
+            16
+          ],
+          "dt": [
+            23,
+            37
+          ]
+        },
+        "candidates_flagged": 7914
+      }
+    },
+    "combined@0.6": {
+      "kev-4b": {
+        "gold_recall": {
+          "uicontrol": 0.6766666666666666,
+          "filepath": 0.91,
+          "codeph": 0.6366666666666667
+        },
+        "sample_flagged": 126,
+        "sample_precision": 0.7222222222222222,
+        "sample_recall": 0.8125,
+        "sample_right_flagged_by_source": {
+          "uicontrol": [
+            8,
+            18
+          ],
+          "filepath": [
+            28,
+            36
+          ],
+          "codeph": [
+            29,
+            32
+          ],
+          "emphasis": [
+            6,
+            11
+          ],
+          "dt": [
+            20,
+            29
+          ]
+        },
+        "candidates_flagged": 5619
+      },
+      "jev-1.13": {
+        "gold_recall": {
+          "uicontrol": 0.8066666666666666,
+          "filepath": 0.8466666666666667,
+          "codeph": 0.8833333333333333
+        },
+        "sample_flagged": 143,
+        "sample_precision": 0.7272727272727273,
+        "sample_recall": 0.9285714285714286,
+        "sample_right_flagged_by_source": {
+          "uicontrol": [
+            9,
+            17
+          ],
+          "filepath": [
+            30,
+            37
+          ],
+          "codeph": [
+            36,
+            36
+          ],
+          "emphasis": [
+            7,
+            16
+          ],
+          "dt": [
+            22,
+            37
+          ]
+        },
+        "candidates_flagged": 7800
+      }
+    },
+    "combined@0.7": {
+      "kev-4b": {
+        "gold_recall": {
+          "uicontrol": 0.6433333333333333,
+          "filepath": 0.91,
+          "codeph": 0.6366666666666667
+        },
+        "sample_flagged": 124,
+        "sample_precision": 0.7338709677419355,
+        "sample_recall": 0.8125,
+        "sample_right_flagged_by_source": {
+          "uicontrol": [
+            8,
+            16
+          ],
+          "filepath": [
+            28,
+            36
+          ],
+          "codeph": [
+            29,
+            32
+          ],
+          "emphasis": [
+            6,
+            11
+          ],
+          "dt": [
+            20,
+            29
+          ]
+        },
+        "candidates_flagged": 5499
+      },
+      "jev-1.13": {
+        "gold_recall": {
+          "uicontrol": 0.8066666666666666,
+          "filepath": 0.8466666666666667,
+          "codeph": 0.8833333333333333
+        },
+        "sample_flagged": 141,
+        "sample_precision": 0.723404255319149,
+        "sample_recall": 0.9107142857142857,
+        "sample_right_flagged_by_source": {
+          "uicontrol": [
+            9,
+            16
+          ],
+          "filepath": [
+            30,
+            37
+          ],
+          "codeph": [
+            36,
+            36
+          ],
+          "emphasis": [
+            7,
+            16
+          ],
+          "dt": [
+            20,
+            36
+          ]
+        },
+        "candidates_flagged": 7744
+      }
+    },
+    "combined@0.8": {
+      "kev-4b": {
+        "gold_recall": {
+          "uicontrol": 0.6,
+          "filepath": 0.91,
+          "codeph": 0.6366666666666667
+        },
+        "sample_flagged": 117,
+        "sample_precision": 0.7435897435897436,
+        "sample_recall": 0.7767857142857143,
+        "sample_right_flagged_by_source": {
+          "uicontrol": [
+            7,
+            14
+          ],
+          "filepath": [
+            28,
+            36
+          ],
+          "codeph": [
+            29,
+            32
+          ],
+          "emphasis": [
+            6,
+            11
+          ],
+          "dt": [
+            17,
+            24
+          ]
+        },
+        "candidates_flagged": 5309
+      },
+      "jev-1.13": {
+        "gold_recall": {
+          "uicontrol": 0.7866666666666666,
+          "filepath": 0.8466666666666667,
+          "codeph": 0.8833333333333333
+        },
+        "sample_flagged": 139,
+        "sample_precision": 0.7266187050359713,
+        "sample_recall": 0.9017857142857143,
+        "sample_right_flagged_by_source": {
+          "uicontrol": [
+            8,
+            14
+          ],
+          "filepath": [
+            30,
+            37
+          ],
+          "codeph": [
+            36,
+            36
+          ],
+          "emphasis": [
+            7,
+            16
+          ],
+          "dt": [
+            20,
+            36
+          ]
+        },
+        "candidates_flagged": 7714
+      }
+    },
+    "combined@0.9": {
+      "kev-4b": {
+        "gold_recall": {
+          "uicontrol": 0.5166666666666667,
+          "filepath": 0.91,
+          "codeph": 0.6433333333333333
+        },
+        "sample_flagged": 108,
+        "sample_precision": 0.75,
+        "sample_recall": 0.7232142857142857,
+        "sample_right_flagged_by_source": {
+          "uicontrol": [
+            6,
+            12
+          ],
+          "filepath": [
+            28,
+            36
+          ],
+          "codeph": [
+            29,
+            32
+          ],
+          "emphasis": [
+            5,
+            10
+          ],
+          "dt": [
+            13,
+            18
+          ]
+        },
+        "candidates_flagged": 4974
+      },
+      "jev-1.13": {
+        "gold_recall": {
+          "uicontrol": 0.7833333333333333,
+          "filepath": 0.8466666666666667,
+          "codeph": 0.8833333333333333
+        },
+        "sample_flagged": 139,
+        "sample_precision": 0.7266187050359713,
+        "sample_recall": 0.9017857142857143,
+        "sample_right_flagged_by_source": {
+          "uicontrol": [
+            8,
+            14
+          ],
+          "filepath": [
+            30,
+            37
+          ],
+          "codeph": [
+            36,
+            36
+          ],
+          "emphasis": [
+            7,
+            16
+          ],
+          "dt": [
+            20,
+            36
+          ]
+        },
+        "candidates_flagged": 7710
+      }
+    }
+  },
+  "agreement": {
+    "choice": {
+      "gold": 0.6855555555555556,
+      "candidates": 0.6872879520681441,
+      "flagged_by_both": 4237,
+      "flagged_by_only_kev-4b": 407,
+      "flagged_by_only_jev-1.13": 3472
+    },
+    "noul@0.5": {
+      "gold": 0.8033333333333333,
+      "candidates": 0.5299213166823071,
+      "flagged_by_both": 6478,
+      "flagged_by_only_kev-4b": 5293,
+      "flagged_by_only_jev-1.13": 352
+    },
+    "noul@0.6": {
+      "gold": 0.7577777777777778,
+      "candidates": 0.5601674727495849,
+      "flagged_by_both": 5191,
+      "flagged_by_only_kev-4b": 5120,
+      "flagged_by_only_jev-1.13": 451
+    },
+    "noul@0.7": {
+      "gold": 0.7144444444444444,
+      "candidates": 0.6191438677542771,
+      "flagged_by_both": 3933,
+      "flagged_by_only_kev-4b": 4387,
+      "flagged_by_only_jev-1.13": 610
+    },
+    "noul@0.8": {
+      "gold": 0.7011111111111111,
+      "candidates": 0.7133472893957987,
+      "flagged_by_both": 2399,
+      "flagged_by_only_kev-4b": 3152,
+      "flagged_by_only_jev-1.13": 700
+    },
+    "noul@0.9": {
+      "gold": 0.6622222222222223,
+      "candidates": 0.8574316032628312,
+      "flagged_by_both": 816,
+      "flagged_by_only_kev-4b": 1353,
+      "flagged_by_only_jev-1.13": 605
+    },
+    "hybrid@0.5": {
+      "gold": 0.7744444444444445,
+      "candidates": 0.5289828917923916,
+      "flagged_by_both": 5785,
+      "flagged_by_only_kev-4b": 5144,
+      "flagged_by_only_jev-1.13": 565
+    },
+    "hybrid@0.6": {
+      "gold": 0.7411111111111112,
+      "candidates": 0.5740272865083376,
+      "flagged_by_both": 4626,
+      "flagged_by_only_kev-4b": 4712,
+      "flagged_by_only_jev-1.13": 687
+    },
+    "hybrid@0.7": {
+      "gold": 0.7244444444444444,
+      "candidates": 0.6437594744820616,
+      "flagged_by_both": 3536,
+      "flagged_by_only_kev-4b": 3862,
+      "flagged_by_only_jev-1.13": 797
+    },
+    "hybrid@0.8": {
+      "gold": 0.7077777777777777,
+      "candidates": 0.7366635385837003,
+      "flagged_by_both": 2174,
+      "flagged_by_only_kev-4b": 2710,
+      "flagged_by_only_jev-1.13": 845
+    },
+    "hybrid@0.9": {
+      "gold": 0.67,
+      "candidates": 0.8637118313722659,
+      "flagged_by_both": 742,
+      "flagged_by_only_kev-4b": 1208,
+      "flagged_by_only_jev-1.13": 668
+    },
+    "combined@0.5": {
+      "gold": 0.7888888888888889,
+      "candidates": 0.7216487403450517,
+      "flagged_by_both": 5135,
+      "flagged_by_only_kev-4b": 565,
+      "flagged_by_only_jev-1.13": 2779
+    },
+    "combined@0.6": {
+      "gold": 0.7855555555555556,
+      "candidates": 0.7258355590846748,
+      "flagged_by_both": 5058,
+      "flagged_by_only_kev-4b": 561,
+      "flagged_by_only_jev-1.13": 2742
+    },
+    "combined@0.7": {
+      "gold": 0.7766666666666666,
+      "candidates": 0.7246805746047787,
+      "flagged_by_both": 4953,
+      "flagged_by_only_kev-4b": 546,
+      "flagged_by_only_jev-1.13": 2791
+    },
+    "combined@0.8": {
+      "gold": 0.7677777777777778,
+      "candidates": 0.7202050097451815,
+      "flagged_by_both": 4804,
+      "flagged_by_only_kev-4b": 505,
+      "flagged_by_only_jev-1.13": 2910
+    },
+    "combined@0.9": {
+      "gold": 0.7444444444444445,
+      "candidates": 0.7078611131162925,
+      "flagged_by_both": 4537,
+      "flagged_by_only_kev-4b": 437,
+      "flagged_by_only_jev-1.13": 3173
+    }
+  },
+  "gold_confusion_choice": {
+    "kev-4b": {
+      "uicontrol": {
+        "plain": 160,
+        "uicontrol": 99,
+        "codeph": 34,
+        "filepath": 7
+      },
+      "filepath": {
+        "filepath": 273,
+        "plain": 12,
+        "codeph": 15
+      },
+      "codeph": {
+        "codeph": 194,
+        "plain": 81,
+        "filepath": 25
+      }
+    },
+    "jev-1.13": {
+      "uicontrol": {
+        "uicontrol": 235,
+        "codeph": 39,
+        "plain": 25,
+        "filepath": 1
+      },
+      "filepath": {
+        "filepath": 254,
+        "codeph": 40,
+        "plain": 6
+      },
+      "codeph": {
+        "codeph": 267,
+        "filepath": 15,
+        "plain": 15,
+        "uicontrol": 3
+      }
+    }
+  },
+  "disagreements_on_labels": {
+    "only_jev-1.13_right": [
+      {
+        "match": "XSLT/XQuery",
+        "source": "uicontrol",
+        "label": "plain",
+        "kev-4b": "codeph",
+        "jev-1.13": "plain"
+      },
+      {
+        "match": "Help > Install",
+        "source": "uicontrol",
+        "label": "uicontrol",
+        "kev-4b": "plain",
+        "jev-1.13": "uicontrol"
+      },
+      {
+        "match": "Subscription Status",
+        "source": "uicontrol",
+        "label": "uicontrol",
+        "kev-4b": "plain",
+        "jev-1.13": "uicontrol"
+      },
+      {
+        "match": "AI Autocompletion in Text",
+        "source": "uicontrol",
+        "label": "uicontrol",
+        "kev-4b": "plain",
+        "jev-1.13": "uicontrol"
+      },
+      {
+        "match": "Author",
+        "source": "uicontrol",
+        "label": "uicontrol",
+        "kev-4b": "plain",
+        "jev-1.13": "uicontrol"
+      },
+      {
+        "match": "Help",
+        "source": "uicontrol",
+        "label": "uicontrol",
+        "kev-4b": "plain",
+        "jev-1.13": "uicontrol"
+      },
+      {
+        "match": "AI Positron",
+        "source": "uicontrol",
+        "label": "uicontrol",
+        "kev-4b": "plain",
+        "jev-1.13": "uicontrol"
+      },
+      {
+        "match": "XSLT",
+        "source": "uicontrol",
+        "label": "plain",
+        "kev-4b": "codeph",
+        "jev-1.13": "plain"
+      },
+      {
+        "match": "Amazon S3",
+        "source": "uicontrol",
+        "label": "plain",
+        "kev-4b": "uicontrol",
+        "jev-1.13": "plain"
+      },
+      {
+        "match": "plugin.xml",
+        "source": "filepath",
+        "label": "filepath",
+        "kev-4b": "codeph",
+        "jev-1.13": "filepath"
+      },
+      {
+        "match": ".//",
+        "source": "filepath",
+        "label": "codeph",
+        "kev-4b": "plain",
+        "jev-1.13": "codeph"
+      },
+      {
+        "match": "/Java",
+        "source": "filepath",
+        "label": "plain",
+        "kev-4b": "codeph",
+        "jev-1.13": "plain"
+      },
+      {
+        "match": "-keystore-file",
+        "source": "codeph",
+        "label": "codeph",
+        "kev-4b": "filepath",
+        "jev-1.13": "codeph"
+      },
+      {
+        "match": "-insert-before",
+        "source": "codeph",
+        "label": "codeph",
+        "kev-4b": "plain",
+        "jev-1.13": "codeph"
+      },
+      {
+        "match": "type=\"surround\"",
+        "source": "codeph",
+        "label": "codeph",
+        "kev-4b": "plain",
+        "jev-1.13": "codeph"
+      },
+      {
+        "match": "${frameworkDir(fr_name)}",
+        "source": "codeph",
+        "label": "codeph",
+        "kev-4b": "filepath",
+        "jev-1.13": "codeph"
+      },
+      {
+        "match": "${ask('Hello world!')}",
+        "source": "codeph",
+        "label": "codeph",
+        "kev-4b": "uicontrol",
+        "jev-1.13": "codeph"
+      },
+      {
+        "match": "-gp",
+        "source": "codeph",
+        "label": "codeph",
+        "kev-4b": "plain",
+        "jev-1.13": "codeph"
+      },
+      {
+        "match": "default_value",
+        "source": "codeph",
+        "label": "codeph",
+        "kev-4b": "plain",
+        "jev-1.13": "codeph"
+      },
+      {
+        "match": "Admin",
+        "source": "emphasis",
+        "label": "plain",
+        "kev-4b": "codeph",
+        "jev-1.13": "plain"
+      },
+      {
+        "match": "left",
+        "source": "emphasis",
+        "label": "codeph",
+        "kev-4b": "plain",
+        "jev-1.13": "codeph"
+      },
+      {
+        "match": "change tracking",
+        "source": "emphasis",
+        "label": "plain",
+        "kev-4b": "codeph",
+        "jev-1.13": "plain"
+      },
+      {
+        "match": "DB2 Clients and Development Tools",
+        "source": "emphasis",
+        "label": "uicontrol",
+        "kev-4b": "plain",
+        "jev-1.13": "uicontrol"
+      },
+      {
+        "match": "XML Operation Descriptor",
+        "source": "emphasis",
+        "label": "plain",
+        "kev-4b": "filepath",
+        "jev-1.13": "plain"
+      },
+      {
+        "match": "link",
+        "source": "emphasis",
+        "label": "plain",
+        "kev-4b": "uicontrol",
+        "jev-1.13": "plain"
+      },
+      {
+        "match": "Edit Topic Content",
+        "source": "dt",
+        "label": "uicontrol",
+        "kev-4b": "plain",
+        "jev-1.13": "uicontrol"
+      },
+      {
+        "match": "Profiling Colors and Styles Table",
+        "source": "dt",
+        "label": "uicontrol",
+        "kev-4b": "plain",
+        "jev-1.13": "uicontrol"
+      },
+      {
+        "match": "HTML to XML Well-formed",
+        "source": "dt",
+        "label": "uicontrol",
+        "kev-4b": "plain",
+        "jev-1.13": "uicontrol"
+      },
+      {
+        "match": "Cut/Copy",
+        "source": "dt",
+        "label": "uicontrol",
+        "kev-4b": "plain",
+        "jev-1.13": "uicontrol"
+      },
+      {
+        "match": "Error display",
+        "source": "dt",
+        "label": "uicontrol",
+        "kev-4b": "plain",
+        "jev-1.13": "uicontrol"
+      },
+      {
+        "match": "List of Suggestions",
+        "source": "dt",
+        "label": "uicontrol",
+        "kev-4b": "plain",
+        "jev-1.13": "uicontrol"
+      },
+      {
+        "match": "Group by \"Resource\"",
+        "source": "dt",
+        "label": "uicontrol",
+        "kev-4b": "plain",
+        "jev-1.13": "uicontrol"
+      },
+      {
+        "match": "Incremental",
+        "source": "dt",
+        "label": "uicontrol",
+        "kev-4b": "plain",
+        "jev-1.13": "uicontrol"
+      },
+      {
+        "match": "Show dependent resources",
+        "source": "dt",
+        "label": "uicontrol",
+        "kev-4b": "plain",
+        "jev-1.13": "uicontrol"
+      },
+      {
+        "match": "Copy as Markdown",
+        "source": "dt",
+        "label": "uicontrol",
+        "kev-4b": "plain",
+        "jev-1.13": "uicontrol"
+      }
+    ],
+    "only_kev-4b_right": [
+      {
+        "match": "XSLT/XQuery",
+        "source": "uicontrol",
+        "label": "plain",
+        "kev-4b": "plain",
+        "jev-1.13": "codeph"
+      },
+      {
+        "match": "Available in Text",
+        "source": "uicontrol",
+        "label": "plain",
+        "kev-4b": "plain",
+        "jev-1.13": "uicontrol"
+      },
+      {
+        "match": "Explorer/Finder",
+        "source": "uicontrol",
+        "label": "plain",
+        "kev-4b": "plain",
+        "jev-1.13": "uicontrol"
+      },
+      {
+        "match": "XML",
+        "source": "uicontrol",
+        "label": "plain",
+        "kev-4b": "plain",
+        "jev-1.13": "uicontrol"
+      },
+      {
+        "match": "Ellipsis",
+        "source": "uicontrol",
+        "label": "plain",
+        "kev-4b": "plain",
+        "jev-1.13": "uicontrol"
+      },
+      {
+        "match": "add/modify/remove",
+        "source": "filepath",
+        "label": "plain",
+        "kev-4b": "plain",
+        "jev-1.13": "codeph"
+      },
+      {
+        "match": "AND/OR",
+        "source": "emphasis",
+        "label": "plain",
+        "kev-4b": "plain",
+        "jev-1.13": "codeph"
+      },
+      {
+        "match": "rowspans",
+        "source": "emphasis",
+        "label": "plain",
+        "kev-4b": "plain",
+        "jev-1.13": "codeph"
+      },
+      {
+        "match": "functions",
+        "source": "emphasis",
+        "label": "plain",
+        "kev-4b": "plain",
+        "jev-1.13": "codeph"
+      },
+      {
+        "match": "Example: Atx Style Headers",
+        "source": "emphasis",
+        "label": "plain",
+        "kev-4b": "plain",
+        "jev-1.13": "codeph"
+      },
+      {
+        "match": "An Example of the sqf:user-entry Element",
+        "source": "emphasis",
+        "label": "plain",
+        "kev-4b": "plain",
+        "jev-1.13": "codeph"
+      },
+      {
+        "match": "3.3.2 Labels or Instructions",
+        "source": "emphasis",
+        "label": "plain",
+        "kev-4b": "plain",
+        "jev-1.13": "uicontrol"
+      },
+      {
+        "match": "Insert actions",
+        "source": "dt",
+        "label": "plain",
+        "kev-4b": "plain",
+        "jev-1.13": "uicontrol"
+      },
+      {
+        "match": "List actions",
+        "source": "dt",
+        "label": "plain",
+        "kev-4b": "plain",
+        "jev-1.13": "uicontrol"
+      },
+      {
+        "match": "Saving the Project",
+        "source": "dt",
+        "label": "plain",
+        "kev-4b": "plain",
+        "jev-1.13": "uicontrol"
+      },
+      {
+        "match": "Direct Editing Actions in the File Comparison Panels",
+        "source": "dt",
+        "label": "plain",
+        "kev-4b": "plain",
+        "jev-1.13": "uicontrol"
+      },
+      {
+        "match": "Drag and Drop Mechanism",
+        "source": "dt",
+        "label": "plain",
+        "kev-4b": "plain",
+        "jev-1.13": "uicontrol"
+      },
+      {
+        "match": "Displaying Differences in the File Comparison Panels",
+        "source": "dt",
+        "label": "plain",
+        "kev-4b": "plain",
+        "jev-1.13": "uicontrol"
+      },
+      {
+        "match": "Contextual Menu Actions",
+        "source": "dt",
+        "label": "plain",
+        "kev-4b": "plain",
+        "jev-1.13": "uicontrol"
+      },
+      {
+        "match": "Hover and Click Actions",
+        "source": "dt",
+        "label": "plain",
+        "kev-4b": "plain",
+        "jev-1.13": "uicontrol"
+      },
+      {
+        "match": "Number of Changes and Conflicts",
+        "source": "dt",
+        "label": "plain",
+        "kev-4b": "plain",
+        "jev-1.13": "uicontrol"
+      }
+    ]
+  }
+}

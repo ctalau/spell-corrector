@@ -10,6 +10,7 @@ unchanged; `judge` records which model answered.
     OPENROUTER_API_KEY=... judge_unmarked_jev.py reports/markup_audit/gold_sample.jsonl --out judged_gold_jev.jsonl
 
 Reads OPENROUTER_API_KEY from the environment and never prints it. Resumable: rows already in --out are skipped.
+A span the provider refuses with HTTP 403 five times running is logged and left out of --out.
 """
 from __future__ import annotations
 
@@ -42,8 +43,10 @@ def ask(key: str, model: str, r: dict) -> dict:
                 res = json.loads(resp.read())
             break
         except urllib.error.HTTPError as e:
+            # the provider's firewall refuses a few spans outright (`c:\boot.ini`, Java stack traces): skip them
+            if e.code == 403 and attempt == 4: return None
             # retry rate limits and provider-side failures only; any other 4xx is a real error
-            if attempt == 4 or (e.code < 500 and e.code != 429):
+            if e.code != 403 and (attempt == 4 or (e.code < 500 and e.code != 429)):
                 raise RuntimeError(f"Jev HTTP {e.code}: {e.read()[:300]!r}") from None
         except (urllib.error.URLError, TimeoutError):
             if attempt == 4: raise
@@ -80,6 +83,9 @@ def main() -> int:
             if spent[0] >= a.budget: return
             j = ask(key, a.model, r)
             with lock:
+                if j is None:
+                    print(f"refused (HTTP 403), not judged: {r['file']}:{r['line']} {r['match']!r}", file=sys.stderr)
+                    return
                 f.write(json.dumps(j, ensure_ascii=False) + "\n"); f.flush()
                 spent[0] += j["cost_usd"]; n[0] += 1
                 if n[0] % 250 == 0: print(f"{n[0]}/{len(todo)} ${spent[0]:.3f}", file=sys.stderr, flush=True)

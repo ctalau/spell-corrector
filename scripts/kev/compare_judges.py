@@ -53,9 +53,15 @@ def main() -> int:
     na, nb = a.names.split(",")
     labelled = [(key(l), l["label"]) for l in load(a.labels)]
     judges = {na: (load(a.gold_a), load(a.cands_a)), nb: (load(a.gold_b), load(a.cands_b))}
+    # score both judges on the spans both answered (Jev's provider refuses a handful outright)
+    both = {k for k in (key(r) for r in judges[na][1]) if k in {key(r) for r in judges[nb][1]}}
+    both_gold = {key(r) for r in judges[na][0]} & {key(r) for r in judges[nb][0]}
+    judges = {j: ([r for r in g if key(r) in both_gold], [r for r in c if key(r) in both]) for j, (g, c) in judges.items()}
+    labelled = [(k, y) for k, y in labelled if k in both]
     rules = [("choice", 0.0)] + [(k, t) for k in ("noul", "hybrid", "combined") for t in THRESHOLDS]
 
-    result = {"rules": {}, "agreement": {}, "gold_confusion_choice": {}, "disagreements_on_labels": {}}
+    result = {"spans_compared": {"gold": len(both_gold), "candidates": len(both), "hand_labelled": len(labelled)},
+              "rules": {}, "agreement": {}, "gold_confusion_choice": {}, "disagreements_on_labels": {}}
     for rule, t in rules:
         name = rule if rule == "choice" else f"{rule}@{t}"
         result["rules"][name] = {j: score(g, c, labelled, rule, t) for j, (g, c) in judges.items()}
